@@ -458,6 +458,20 @@ Refresh:
                 'If Not Settings.Get(Of Boolean)("UiHiddenSetupLink") Then AvaliableCount += 1
                 If Not Settings.Get(Of Boolean)("UiHiddenSetupSystem") Then AvaliableCount += 1
                 FrmSetupLeft.PanItem.Visibility = If(AvaliableCount < 2 AndAlso Not HiddenForceShow, Visibility.Collapsed, Visibility.Visible)
+                'DSH 魔改：把上面按 UiHiddenSetup* 算出来的显隐再按 DSH 模式收紧一遍。
+                '为什么必须在这里（实机 bug）：本方法会被多条刷新路径调用，
+                '而"第一次进设置页"与"从别的页面返回设置页"走的路径不同 ——
+                '于是出现"第一次进左栏漏出启动/个性化/其他，返回后才是干净的"这种不一致。
+                '放在这里，任何一次刷新都会把规则重新施加，结果稳定。
+                '（DSH 模式下这四项全部隐藏后，AvaliableCount 会小于 2，PCL 自己就把整个左栏收起来了，
+                '  这正是期望效果：只留右面板的 DSH 运行环境设置。）
+                If PageLaunchLeft.DshModeEnabled() Then
+                    FrmSetupLeft.ItemLaunch.Visibility = Visibility.Collapsed
+                    FrmSetupLeft.ItemLink.Visibility = Visibility.Collapsed
+                    FrmSetupLeft.ItemUI.Visibility = Visibility.Collapsed
+                    FrmSetupLeft.ItemSystem.Visibility = Visibility.Collapsed
+                    FrmSetupLeft.PanItem.Visibility = Visibility.Collapsed
+                End If
             End If
             '更多子页面
             Dim OtherAvaliableCount As Integer = 0

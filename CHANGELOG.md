@@ -5,7 +5,45 @@
 
 ---
 
-## [v0.4.2] — 2026-09-24
+## [v0.4.3] — 2026-09-24
+
+### 修复：两个「首次正常、往返后失效」的隐藏 bug（用户反馈）
+用户报的两条现象，根因是同一个：**「第一次进入」和「从别的页面返回」走的是不同的刷新路径。**
+
+1. **设置页左栏：第一次进会漏出「启动 / 个性化 / 其他」，返回后才干净**
+   `PageSetupUI.HiddenRefresh()` 会被多条刷新路径调用，而第一次进设置页与返回设置页的调用时机不同。
+   修法：把 DSH 的收紧规则放进 `HiddenRefresh()` **末尾**，这样任何一次刷新都会重新施加，结果稳定。
+   顺带说明：DSH 下把设置子页面全隐后，正好命中 PCL 自己的规则
+   `PanItem.Visibility = If(AvaliableCount < 2 ..., Collapsed, Visible)` —— 整个左栏会消失，
+   **这正是期望效果**（只留右面板的 DSH 设置）。
+
+2. **启动页：「正版 / 离线」第一次藏住了，返回后又冒出来**
+   `PageLaunchLeft.RefreshPage` 的 `UnknownType` 分支里有 `PanType.Visibility = Visibility.Visible`，
+   每次进启动页都会执行，把上一轮的隐藏覆盖掉。
+   修法：不再逐个元素打补丁，而是给**整个登录区**套一层容器 `PanLoginArea`
+   （内含 `PanLogin` 登录页面宿主 / `PanTypeOne` 登录方式标签 / `PanType` 正版离线按钮），
+   DSH 模式下只折叠这一处，盖住 PCL 的所有零散赋值。
+   实机确认：启动页只剩「下载 dsh」与「整合包管理」，账号 UI 全部消失。
+
+**教训**：只要 PCL 会在多处给同一个元素赋 `Visibility`，就要用一个统一的父容器做「总开关」，
+而不是逐个打补丁——补丁很容易漏，而且不同进入路径下表现不一致。
+
+### 变更
+- `ModBase.vb`：版本号 `0.4.2` → `0.4.3`。
+- `PageSetupUI.xaml.vb`：`HiddenRefresh()` 末尾追加 DSH 收紧规则。
+- `PageLaunchLeft.xaml`：新增 `PanLoginArea` 容器包住登录区（**未移除任何元素**，
+  `PanLogin` 仍是登录页面宿主，只是换了父级）。
+- `PageLaunchLeft.xaml.vb`：改为折叠 `PanLoginArea` 一处。
+- `DEVNOTES.md`：新增 4 条（#61 两种刷新路径的差异与"总开关"思路、
+  #62 PCL 的左栏自动隐藏规则、#63 搬动 XAML 元素要查重名与标签配对、
+  #64 PCL 自绘控件无法用 UIA 编程导航）。
+
+### 待用户确认
+往返切换（启动 → 设置 → 启动）是否两个页面都稳定。我无法编程导航 PCL 的自绘控件
+（UIA 里既没有 InvokePattern 也没有 SelectionItemPattern，Tab 焦点也容易被页面内控件吃掉），
+所以这一步需要你点几下确认。
+
+---
 
 ### 变更：把「功能隐藏」的结果固定下来（用户要求）
 用户在 PCL 原版的「功能隐藏」页手动勾选出了想要的形态，要求固化。现在启动时由

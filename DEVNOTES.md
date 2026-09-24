@@ -434,6 +434,28 @@ E:\DeepseekHarnessWP\
     **同一份配置文件被两个人同时动时，别急着下根因结论**；
     正确做法是先问一句，或者观察多次启动是否稳定复现。
 
+61. **"进入后第一次"和"从别的页面返回"走的是不同的刷新路径**（用户报的两个 bug 都是这个根源）：
+    · 设置页左栏：`PageSetupUI.HiddenRefresh()` 会被多条路径调用，第一次进设置页与返回设置页
+      的时机不同，导致"第一次左栏漏出 MC 条目、返回后才是干净的"。
+      → 修法：把 DSH 的收紧规则放进 `HiddenRefresh()` **末尾**，任何一次刷新都会重新施加。
+    · 启动页「正版/离线」：`RefreshPage` 的 `UnknownType` 分支里有 `PanType.Visibility = Visible`，
+      每次进启动页都会执行，把上一轮的隐藏覆盖掉。
+      → 修法：不要逐个元素打补丁，而是给整个登录区套一层容器 `PanLoginArea`，只折叠这一处。
+      **教训：只要 PCL 会在多处给同一个元素赋 Visibility，就要想办法用一个统一的父容器"总开关"盖住它。**
+
+62. **`PageSetupUI.HiddenRefresh()` 里有一条"可选子页面少于 2 个就隐藏整个左栏"的规则**：
+    `FrmSetupLeft.PanItem.Visibility = If(AvaliableCount < 2 AndAlso Not HiddenForceShow, Collapsed, Visible)`。
+    DSH 模式下把设置子页面全隐后正好命中这条，左栏整块消失——**这正是期望效果**，不是 bug。
+
+63. **XAML 里搬动元素时要注意别把 `x:Name` 弄重**：我先加了一层容器又保留了同名元素，
+    短暂出现了两个 `PanLogin`。改完要用缩进/标签配对检查一遍（本次写了脚本统计 `<Grid>`/`</Grid>` 深度，
+    最终深度应等于 1）。
+
+64. **PCL 的自绘控件在 UI Automation 里既没有 InvokePattern 也没有 SelectionItemPattern**，
+    所以**没法用 UIA 编程导航**（`TryGetCurrentPattern` 全返回 False），
+    用 Tab/Enter 也容易被页面内的可聚焦控件吃掉焦点。
+    → 验证界面只能靠"直接启动到目标页面 + 截图/读日志"，需要用户配合操作的地方就别硬凑。
+
 ---
 
 ## 8b. 本地构建环境搭建记录（v0.3.0 完成）
