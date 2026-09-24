@@ -15,7 +15,9 @@ Public Class PageDownloadDsh
 
     Private Sub LoaderInit() Handles Me.Initialized
         PageLoaderInit(Load, PanLoad, PanContent, Nothing, DshVersionListLoader, AddressOf Load_OnFinish)
-        '把安装加载器接到安装进度环上：ShowProgress 依赖 State 才能显示百分比文本
+        '任务栏登记/清理由模块负责（安装是后台任务，页面可能被切走，见 DshInstallStateChanged）
+        DshInstallInit()
+        '把安装任务接到安装进度环上：ShowProgress 依赖 State 才能显示百分比文本
         LoadInstall.State = DshVersionInstallLoader
         AddHandler DshVersionInstallLoader.OnStateChangedUi, AddressOf InstallStateChanged
         AddHandler DshInstallStatusChanged, Sub(T) RunInUi(Sub()
@@ -23,7 +25,10 @@ Public Class PageDownloadDsh
                                                           End Sub)
     End Sub
 
-    ''' <summary>安装加载器状态变化 → 显示/隐藏安装进度浮层。</summary>
+    ''' <summary>
+    ''' 安装任务状态变化 → 只负责本页的进度浮层显隐。
+    ''' 任务栏的登记/清理在模块的 DshInstallStateChanged 里做（页面可能被切走）。
+    ''' </summary>
     Private Sub InstallStateChanged(Loader As LoaderBase, NewState As LoadState, OldState As LoadState)
         Select Case NewState
             Case LoadState.Loading
@@ -124,6 +129,7 @@ Public Class PageDownloadDsh
     ''' <summary>取消正在进行的安装。</summary>
     Private Sub CancelInstall_Click(sender As Object, e As MouseButtonEventArgs)
         If DshVersionInstallLoader.State = LoadState.Loading Then
+            '取消组合加载器会连带取消子任务，子任务里会 taskkill 掉整棵 npm 进程树
             DshVersionInstallLoader.Cancel()
             LabInstall.Text = "正在取消安装……"
         End If
@@ -240,8 +246,10 @@ Public Class PageDownloadDsh
                                     End Sub
         End If
 
-        DshRequestVersionInstall(Info.Version)
-        DshVersionInstallLoader.Start(0, IsForceRestart:=True)
+        '由组合统一启动安装任务。
+        '不要在这里手动 Start 子任务：IsForceRestart:=True 对运行中的加载器也会返回 True，
+        '会把任务重启一遍（同一次安装跑两遍 worker，界面报失败而 npm 在后台偷偷跑）。
+        DshInstallStart(Info.Version)
         Hint($"正在安装 dsh {Info.Version}，请稍候……", HintType.Blue)
     End Sub
 

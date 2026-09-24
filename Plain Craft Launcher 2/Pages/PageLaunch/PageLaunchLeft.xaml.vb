@@ -24,6 +24,8 @@ Public Class PageLaunchLeft
 
         'DSH 模式：先扫整合包列表（不联网），并触发首次启动引导
         DshInstanceListLoader.Start(0)
+        '挂上安装任务的模块级状态跟踪（任务管理器登记/清理、完成后刷新列表）
+        DshInstallInit()
         DshEnsureFirstRun()
 
         '加载版本

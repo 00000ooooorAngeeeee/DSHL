@@ -5,6 +5,73 @@
 
 ---
 
+## [v0.3.8] — 2026-09-24
+
+### 新增：安装 dsh 接入 PCL 的「任务管理器（后台下载队列）」
+上一版我理解错了需求——以为你要的是页面内的进度环。你要的是 PCL **原版那套后台下载机制**，
+现在按 `LoaderTaskbar` 的约定接上了。
+
+**PCL 的机制**（`LoaderTaskbar` ＋ 每 50ms 的 `LoaderTaskbarProgressRefresh`）：
+- **右下角的下载按钮**会显示进度（`FrmMain.BtnExtraDownload.Progress`）
+- **Windows 任务栏**出现进度条
+- **「更多 → 任务管理」**里出现一张任务卡片，可以看到子项进度、也能取消
+
+实现要点：
+- 安装任务包了一层 `LoaderCombo(Of Integer)`。**必须包**——`LoaderTaskbarAdd` 只接受 `LoaderCombo(Of T)`，
+  而且任务管理页会调用 `GetLoaderList()`，那是 `LoaderCombo` 才有的方法，
+  把 `LoaderTask` 直接塞进 `LoaderTaskbar` 会抛 `MissingMethodException`。
+- 任务栏的**注册/清理放在模块层**，不放在页面事件里：安装是后台任务，用户随时可能切走页面；
+  若清理逻辑随页面销毁，任务管理器里会残留一张永远不消失的卡片。
+
+### 修复：同一次安装会跑两遍 worker（隐蔽且后果严重）
+实测日志：
+```
+11:20:39.441  <16 · L/安装 dsh 版本>  正在安装 dsh 0.1.7-rc.1     ← 第一次执行，正常
+11:20:39.443  <16 · L/安装 dsh 版本>  启动进程：npm.cmd install…  ← npm 真的起来了
+11:20:39.436  <13 · Invoke 72>       LoaderTask 状态改变：Loading ← 同一任务又被 Start 一次
+11:20:39.447  <24 · L/安装 dsh 版本>  出错：已经有一个 dsh 版本正在安装中
+```
+根因：**`LoaderBase.Start(Input, IsForceRestart:=True)` 对【正在运行】的加载器也会返回 True**，
+于是会 `TriggerThreadInterrupt()` 并在**新线程上再跑一遍 LoadDelegate**。
+我写成"先 Start 子任务、再 Start 组合"，于是 worker 被执行两次：第二次撞上并发守卫抛错，
+**界面显示"安装失败"，而 npm 进程还在后台偷偷下 500 个包**——最糟糕的失败模式。
+修法：只 `Start` 最外层的组合，让组合的 `Update()` 去启动子任务（它按输入相等性判断，不会重启运行中的任务）。
+
+### 修复：另外两处
+- **并发守卫加 OwnerThread**：只用一个 Boolean 挡并发，在"同线程多次 Start"的场景会把自己锁死。
+  现在记录持有线程，只挡**别的**线程（后一次由于上一处修复已不会发生，但仍作保险）。
+- **去掉重复刷新**：安装完成时模块和页面各刷了一次版本列表，日志里出现
+  `加载线程 DSH Version List 已中断但线程正常运行至结束，输出被弃用`。现在只在一处触发。
+
+### 实机验证证据
+```
+11:24:27.957  安装 dsh 版本 已加入任务列表
+11:24:28.920  按下附加按钮：任务管理
+11:24:29.067  [PageSpeedLeft] 新建任务管理卡片：安装 dsh 版本      ← 任务管理器卡片出现
+11:24:32.721  [MyIconButton] 按下图标按钮：BtnCancel
+11:24:32.723  [PageSpeedLeft] 关闭任务管理卡片：安装 dsh 版本，且移出任务列表
+```
+另一轮完整安装（未被中断）的证据：
+```
+added 512 packages in 55s
+安装完成 → dsh 0.1.7-rc.1 安装完成
+版本仓库 0.1.7-rc.1：bin.js=True  marker=True
+worker 执行次数 = 1，互斥触发 = 0，异常 = 0
+```
+
+### 变更
+- `ModBase.vb`：版本号 `0.3.7` → `0.3.8`。
+- `ModDshInstall.vb`：新增 `DshVersionInstallTask`（`LoaderTask`）与 `DshVersionInstallLoader`（`LoaderCombo`）、
+  `DshInstallInit`、`DshInstallStart`、`DshInstallAddToTaskbar`、`DshInstallRemoveFromTaskbar`、
+  `DshInstallStateChanged`、`DshInstallCleanup`；并发守卫加 OwnerThread 与诊断日志。
+- `PageDownloadDsh` / `ModDshSetup`：改用 `DshInstallStart`（不再手动 Start 子任务）。
+- `DEVNOTES.md`：新增 5 条（#44 任务管理器机制、#45 IsForceRestart 会重跑 worker、
+  #46 并发守卫要认线程、#47 重复刷新会中断加载器、#48 别用鼠标自动化验证界面）。
+
+### 待实机确认
+右下角下载按钮与 Windows 任务栏上的**进度条观感**需要你在真机上看一次（我无法在不控制鼠标的前提下截图确认）。
+
+---
 ## [v0.3.7] — 2026-09-24
 
 ### 新增：安装 dsh 时显示真实进度（用户反馈"下载时没有下载进度"）

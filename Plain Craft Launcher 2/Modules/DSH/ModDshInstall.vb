@@ -155,24 +155,31 @@ Public Module ModDshInstall
         '（比如引导里点了一次、下载页又点一次），它们会在同一个暂存目录里互相删文件，
         '报出 `ENOTEMPTY: directory not empty, rmdir .../domino/test` 这种莫名其妙的错。
         '这里用一个模块级标志串行化，第二个请求直接告知用户等待即可。
+        '注意：必须是**线程**级互斥，不能挡住同一个线程的重入（否则"先 Start 子任务再 Start 组合"
+        '这类同线程的多次 Start 会把自己锁死）。用 OwnerThread 记录持有者。
         SyncLock DshInstallSlot
-            If DshInstallRunning Then
+            If DshInstallRunning AndAlso DshInstallOwnerThread <> Thread.CurrentThread.ManagedThreadId Then
+                Logger.Warn($"安装互斥触发：持有线程 {DshInstallOwnerThread}，当前线程 {Thread.CurrentThread.ManagedThreadId}")
                 Throw New Exception("已经有一个 dsh 版本正在安装中，请等它完成后再试。" & vbCrLf &
                                     "（npm 需要下载 500 多个包，通常要 1~2 分钟）")
             End If
             DshInstallRunning = True
+            DshInstallOwnerThread = Thread.CurrentThread.ManagedThreadId
         End SyncLock
+        Logger.Info($"开始安装 dsh {Version}（线程 {Thread.CurrentThread.ManagedThreadId}）")
         Try
             DshInstallVersionCore(Loader, Version)
         Finally
             SyncLock DshInstallSlot
                 DshInstallRunning = False
+                DshInstallOwnerThread = -1
             End SyncLock
         End Try
     End Sub
 
     Private ReadOnly DshInstallSlot As New Object
     Private DshInstallRunning As Boolean = False
+    Private DshInstallOwnerThread As Integer = -1
 
     ''' <summary>最近一次安装的状态文案（供界面显示）。</summary>
     Public ReadOnly Property DshInstallStatusText As String
@@ -456,7 +463,114 @@ Public Module ModDshInstall
     Private ReadOnly DshInstallLock As New Object
 
     ''' <summary>安装版本列表加载器：安装完成后刷新已安装状态。</summary>
-    Public DshVersionInstallLoader As New LoaderTask(Of Integer, Integer)("DSH Version Install", AddressOf DshVersionInstallMain)
+    Public DshVersionInstallTask As New LoaderTask(Of Integer, Integer)("安装 dsh 版本", AddressOf DshVersionInstallMain)
+
+    ''' <summary>
+    ''' 安装任务（用于 PCL 的任务管理器 / 后台下载队列）。
+    '''
+    ''' 为什么要多包一层 LoaderCombo：`LoaderTaskbarAdd` 只接受 `LoaderCombo(Of T)`，
+    ''' 而且任务管理页（PageSpeedLeft.TaskRefresh）里会调用 `GetLoaderList()` —— 那是
+    ''' LoaderCombo 才有的方法，直接把 LoaderTask 塞进 LoaderTaskbar 会抛 MissingMethodException。
+    ''' Combo 的 Progress 是其子加载器进度的加权平均，所以单个子任务时等价于子任务进度。
+    ''' 登记之后：右下角的下载按钮会出现进度、Windows 任务栏出现进度条、
+    ''' 「更多 → 任务管理」里出现一张卡片（都是 PCL 原有机制，见 LoaderTaskbarProgressRefresh）。
+    ''' </summary>
+    Public DshVersionInstallLoader As New LoaderCombo(Of Integer)("安装 dsh 版本", {DshVersionInstallTask})
+
+    ''' <summary>模块初始化：把任务栏登记/清理挂到安装任务上（见 DshInstallStateChanged 的说明）。</summary>
+    Public Sub DshInstallInit()
+        Static Done As Boolean = False
+        If Done Then Return
+        Done = True
+        AddHandler DshVersionInstallLoader.OnStateChangedUi, AddressOf DshInstallStateChanged
+    End Sub
+
+    ''' <summary>
+    ''' 启动一次安装。
+    '''
+    ''' 为什么只启动组合、不手动启动子任务（实机踩坑，很重要）：
+    ''' PCL 的 `LoaderBase.Start(Input, IsForceRestart:=True)` 即使对**正在运行**的加载器也返回 True，
+    ''' 于是会 `TriggerThreadInterrupt()` 并**在新线程上再跑一遍 LoadDelegate**。
+    ''' 我原来写成"先 Start 子任务、再 Start 组合"，结果同一次安装的 worker 被执行了两次：
+    ''' 第一次真的去跑 npm 了，第二次撞上并发守卫抛错 → 界面显示"安装失败"，
+    ''' 而 npm 进程还在后台悄悄下 500 个包（最糟糕的失败模式）。
+    '''
+    ''' 正确做法：只 `Start` 组合，让组合的 `Update()` 去启动子任务。
+    ''' 输入传 Nothing，于是 `ShouldStart` 里"输入类型不匹配"判定为 False，
+    ''' 运行中的子任务不会被重启，任务栏的进度也由组合统一对外呈现。
+    ''' </summary>
+    Public Sub DshInstallStart(Version As String)
+        If String.IsNullOrWhiteSpace(Version) Then Throw New Exception("未指定要安装的 dsh 版本")
+        DshRequestVersionInstall(Version)
+        DshVersionInstallLoader.Start(Nothing, IsForceRestart:=True)
+    End Sub
+
+    ''' <summary>把安装任务登记到任务管理器（后台下载队列）。</summary>
+    Public Sub DshInstallAddToTaskbar()
+        Try
+            If Not LoaderTaskbar.Contains(DshVersionInstallLoader) Then
+                LoaderTaskbarAdd(DshVersionInstallLoader)
+            End If
+            DshInstallTaskbarWatched = True
+            RunInUi(Sub()
+                        Try
+                            FrmMain.BtnExtraDownload.ShowRefresh()
+                        Catch
+                        End Try
+                    End Sub)
+        Catch ex As Exception
+            Logger.Warn(ex, "把 dsh 安装任务加入任务列表失败")
+        End Try
+    End Sub
+    Private DshInstallTaskbarWatched As Boolean = False
+
+    ''' <summary>
+    ''' 任务结束后把它移出任务列表。
+    ''' 正常情况下 LoaderTaskbarProgressRefresh 会自动移除，这里兜底（避免界面卡着一张旧卡片）。
+    ''' </summary>
+    Public Sub DshInstallRemoveFromTaskbar()
+        Try
+            If LoaderTaskbar.Contains(DshVersionInstallLoader) Then
+                LoaderTaskbar.Remove(DshVersionInstallLoader)
+                FrmSpeedLeft?.TaskRemove(DshVersionInstallLoader)
+            End If
+            'PCL 没有公开的 LoaderTaskbarRemove，直接操作列表，
+            '并按 PCL 的日志格式自己记一行，方便日后排查
+            LoaderTaskbar.Remove(DshVersionInstallLoader)
+            Logger.Info($"{DshVersionInstallLoader.Name} 已移出任务列表")
+            RunInUi(Sub()
+                        Try
+                            FrmMain.BtnExtraDownload.ShowRefresh()
+                        Catch
+                        End Try
+                    End Sub)
+        Catch ex As Exception
+            Logger.Warn(ex, "把 dsh 安装任务移出任务列表失败")
+        End Try
+    End Sub
+
+    ''' <summary>
+    ''' 模块级跟踪安装任务的状态。
+    ''' 为什么放在模块里而不是页面里（实机设计教训）：安装是**后台任务**，
+    ''' 用户完全可能在安装途中切走页面。如果注册/清理逻辑挂在页面的事件处理器上，
+    ''' 页面一旦销毁，任务栏里就会残留一张永远不消失的卡片。
+    ''' 注意：这里只做任务栏生命周期管理；"刷新列表/提示"由 InstallAfterAction 与
+    ''' DshVersionInstallMain 负责，重复刷新会让版本列表加载器被无谓地中断重跑（实机见过）。
+    ''' </summary>
+    Private Sub DshInstallStateChanged(Loader As LoaderBase, NewState As LoadState, OldState As LoadState)
+        Select Case NewState
+            Case LoadState.Loading
+                DshInstallAddToTaskbar()
+            Case LoadState.Finished, LoadState.Failed, LoadState.Canceled
+                DshInstallCleanup()
+        End Select
+    End Sub
+
+    ''' <summary>安装任务结束后的收尾。</summary>
+    Public Sub DshInstallCleanup()
+        DshInstallRemoveFromTaskbar()
+        DshInstallTaskbarWatched = False
+    End Sub
 
     ''' <summary>
     ''' 安装成功后的回调（由下载页设置，用于"安装并绑定到整合包"）。
