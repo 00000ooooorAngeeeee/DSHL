@@ -465,7 +465,7 @@ Public Module ModDshHome
         If Not Enabled Then
             NewLines.Add($"- name: ""{Plugin.PackageName}""")
             NewLines.Add("  disabled: true")
-            NewLines.Add($"  # 由 PCL2-DSH 启动器关闭于 {Now:yyyy'-'MM'-'dd HH':'mm':'ss'}")
+            NewLines.Add($"  # 由 PCL2-DSH 启动器关闭于 {Now:yyyy'-'MM'-'dd HH':'mm':'ss}")
         End If
 
         FileUtils.Write(PatchPath, NewLines.Join(vbCrLf) & vbCrLf, NewUTF8())

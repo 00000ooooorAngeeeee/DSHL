@@ -717,14 +717,14 @@ Finish:
                 LabVersion.Text = "还没有整合包，点一下新建一个"
                 BtnMore.Visibility = Visibility.Collapsed
             Case 2
-                Logger.Info($"启动按钮：整合包 {Instance.Name} 尚不可启动（{Instance.ErrorMessage}）")
+                Logger.Info($"启动按钮：整合包 {Instance.Name} 尚不可启动（{If(Instance.ErrorMessage, "无错误信息")}）")
                 If Not Instance.IsVersionInstalled Then
                     BtnLaunch.Text = "下载 dsh"
-                    LabVersion.Text = $"整合包「{Instance.Name}」绑定的 dsh {Instance.DshVersion} 尚未安装"
+                    LabVersion.Text = $"整合包「{Instance.Name}」绑定的 dsh {Instance.DshVersion} 尚未安装，点此去安装"
                 Else
                     BtnLaunch.Text = "启动 DeepSeekHarness"
                     BtnLaunch.IsEnabled = False
-                    LabVersion.Text = $"整合包「{Instance.Name}」不可用：{Instance.ErrorMessage}"
+                    LabVersion.Text = $"整合包「{Instance.Name}」不可用：{If(String.IsNullOrWhiteSpace(Instance.ErrorMessage), "未知原因", Instance.ErrorMessage)}"
                 End If
                 BtnLaunch.IsEnabled = True
                 BtnMore.Visibility = Visibility.Collapsed

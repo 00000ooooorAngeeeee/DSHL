@@ -209,8 +209,11 @@ Public Module ModDshInstall
             End If
         Catch
         End Try
+        '注意日期格式字符串里的单引号必须成对：yyyy'-'MM'-'dd HH':'mm':'ss'
+        '（之前多写了一个引号，运行时抛 FormatException"无法为字符 ' 找到匹配的引号字符"，实机踩到过）
+        Dim InstallStamp As String = Now.ToString("yyyy'-'MM'-'dd HH':'mm':'ss")
         FileUtils.Write(Target & ".dsh-installed",
-            $"version={RealVersion}{vbCrLf}installed={Now:yyyy'-'MM'-'dd HH':'mm':'ss'}{vbCrLf}node={NodeExe}{vbCrLf}registry={Registry}{vbCrLf}",
+            $"version={RealVersion}{vbCrLf}installed={InstallStamp}{vbCrLf}node={NodeExe}{vbCrLf}registry={Registry}{vbCrLf}",
             New UTF8Encoding(False))
 
         '6. 清理
@@ -276,8 +279,27 @@ Public Module ModDshInstall
         End If
     End Sub
 
+    ''' <summary>
+    ''' 待安装的 dsh 版本号。
+    ''' 为什么用模块变量而不是 Loader.Input：LoaderBase.WaitForExit() 内部会执行
+    ''' Start(Nothing, ...)，而 Start 会无条件覆盖 Me.Input，导致外部
+    ''' `Start(版本号)` 设置的输入在 `WaitForExit()` 时被冲成 Nothing（实机已验证）。
+    ''' 所以这里用显式的"待办"变量，先设值再启动加载器，绕开这个机制。
+    ''' 调用方顺序：DshRequestVersionInstall(版本) → DshVersionInstallLoader.Start(0)
+    ''' </summary>
+    Private DshPendingInstallVersion As String = Nothing
+
+    ''' <summary>请求安装某个 dsh 版本（线程安全地设置待安装版本）。</summary>
+    Public Sub DshRequestVersionInstall(Version As String)
+        If String.IsNullOrWhiteSpace(Version) Then Throw New Exception("未指定要安装的 dsh 版本")
+        SyncLock DshInstallLock
+            DshPendingInstallVersion = Version
+        End SyncLock
+    End Sub
+    Private ReadOnly DshInstallLock As New Object
+
     ''' <summary>安装版本列表加载器：安装完成后刷新已安装状态。</summary>
-    Public DshVersionInstallLoader As New LoaderTask(Of String, Integer)("DSH Version Install", AddressOf DshVersionInstallMain)
+    Public DshVersionInstallLoader As New LoaderTask(Of Integer, Integer)("DSH Version Install", AddressOf DshVersionInstallMain)
 
     ''' <summary>
     ''' 安装成功后的回调（由下载页设置，用于"安装并绑定到整合包"）。
@@ -285,12 +307,28 @@ Public Module ModDshInstall
     ''' </summary>
     Public InstallAfterAction As Action = Nothing
 
-    Private Sub DshVersionInstallMain(Loader As LoaderTask(Of String, Integer))
-        DshInstallVersion(Loader, Loader.Input)
+    Private Sub DshVersionInstallMain(Loader As LoaderTask(Of Integer, Integer))
+        '取出待安装版本（优先模块变量，其次兼容 Loader.Input 被显式赋值的情况）
+        Dim Version As String = Nothing
+        SyncLock DshInstallLock
+            Version = DshPendingInstallVersion
+            DshPendingInstallVersion = Nothing
+        End SyncLock
+        If String.IsNullOrWhiteSpace(Version) Then
+            '兼容直接 Start(版本字符串) 的调用方式（此时 Loader.Input 是 Object，可能装着字符串）
+            Try
+                Dim Raw As Object = Loader.Input
+                If Raw IsNot Nothing Then Version = CStr(Raw)
+            Catch
+            End Try
+        End If
+        If String.IsNullOrWhiteSpace(Version) Then Throw New Exception("未指定要安装的 dsh 版本（请用 DshRequestVersionInstall 先设置版本）")
+
+        DshInstallVersion(Loader, Version)
         '刷新版本列表的"已安装"标记
         RunInUi(Sub()
                     DshRefreshVersionList()
-                    Hint($"dsh {Loader.Input} 安装完成", HintType.Green)
+                    Hint($"dsh {Version} 安装完成", HintType.Green)
                     Dim Action_ As Action = InstallAfterAction
                     InstallAfterAction = Nothing
                     If Action_ IsNot Nothing Then Action_.Invoke()

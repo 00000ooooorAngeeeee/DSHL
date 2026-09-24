@@ -164,7 +164,8 @@ Public Class PageDownloadDsh
                                     End Sub
         End If
 
-        DshVersionInstallLoader.Start(Info.Version, IsForceRestart:=True)
+        DshRequestVersionInstall(Info.Version)
+        DshVersionInstallLoader.Start(0, IsForceRestart:=True)
         Hint($"正在安装 dsh {Info.Version}，请稍候……", HintType.Blue)
     End Sub
 

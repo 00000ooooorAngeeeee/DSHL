@@ -5,6 +5,55 @@
 
 ---
 
+## [v0.3.2] — 2026-09-24
+
+**端到端跑通「首次引导 → npm 安装 dsh → 新建整合包 → 导入现有 DSH_HOME」全流程**后修掉的 3 个真 bug。
+
+### 修复
+1. **切换下载页必崩（`InvalidCastException`）——本轮最严重的问题**
+   日志证据：
+   ```
+   程序出现未知错误：无法将类型为"System.Windows.Controls.TextBlock"的对象强制转换为类型"PCL.MyListItem"
+     在 PCL.FormMain.PageChange 行号 1367
+   ```
+   根因：`PageChange` 用 `CType(FrmDownloadLeft.PanItem.Children(SubType), MyListItem)` 勾选条目，
+   而 `PageDownloadLeft` 的 StackPanel 里**分组标题 TextBlock 也占下标**：
+   原版是 `[0]原版游戏 [1]社区资源标题 [2..6]五个条目 [7]分组标题 [8]…`，枚举是 `DownloadMod=2 … DownloadShader=6`。
+   我在维护过程中删掉了下标 7 的标题，`ItemDsh` 落到下标 7 而枚举也是 7（看似巧合其实内部全错位），
+   于是 `Children(7)` 拿到 TextBlock 强转 `MyListItem` 崩溃。
+   修复：恢复标题使 `ItemDsh` 回到下标 **8**，并把 `PageSubType.DownloadDsh` 与两处 `Tag` 同步改为 **8**，
+   同时写了核对脚本确认 `PageDownloadLeft`（0/2/3/4/5/6/8）与 `PageSetupLeft`（0/1/2/3/4）下标与枚举全部一致。
+2. **`.dsh-installed` 标记写入时抛 `FormatException`**
+   `FormatException: 无法为字符"'"找到匹配的引号字符`。日期格式字符串 `yyyy'-'MM'-'dd HH':'mm':'ss'` 末尾多了一个引号。
+   `ModDshHome` 的 cordis.patch 注释里也有同样问题。两处都改掉，并加了一个"逐文件检查日期格式引号奇偶性"的审计。
+3. **整合包"不可启动"时提示为空的括号**
+   `启动按钮：整合包 新整合包 尚不可启动（）`——那是因为 dsh 版本还没装完，`ErrorMessage` 为空。
+   现在这种情况显示「整合包「X」绑定的 dsh Y 尚未安装，点此去安装」，避免误导。
+
+### 端到端验证记录（本轮确认可用）
+- dsh 版本安装链路完整跑通：首次引导点「安装推荐版本」→ 正确发出
+  `npm install --prefix … --registry=https://registry.npmmirror.com/ "@deepseek-ai/dsh@0.1.7-rc.1"`，
+  npm 成功安装 512 个包，`node_modules\@deepseek-ai\dsh\lib\bin.js` 入口存在。
+- 新建整合包向导完整跑通：名称 → 版本 → 导入确认 → 工作区选择 → 创建。
+- **「从现有 DSH_HOME 导入」实测成功**：从 `E:\DSHarness\.dsh` **导入 21 个技能**
+  （含 `.disabled` 目录）+ `profiles\web`（含插件与配置）+ `.credentials.yaml` + `.anonymous-user-id`。
+- **端口自动避让验证成功**：用户的全局 DSH 正占用 3080，新建的整合包自动分到 **3081**，
+  不会干扰用户正在运行的实例。
+- `instance.json` 与 `PCL\Setup.ini` 内容正确（版本、端口、工作区、创建时间）。
+- 首次启动引导流程简化后可正常走完（Node 已存在 → 直接进第 2 步安装 dsh）。
+
+### 变更
+- `ModBase.vb`：版本号 `0.3.1` → `0.3.2`。
+- `DEVNOTES.md`：新增 5 条避坑记录（#21 左列表下标必须与枚举一致、#22 `WaitForExit` 会覆盖 `Loader.Input`、
+  #23 日期格式引号必须成对、#24 内置 profile 不能用 `--from-default-profile`、#25 `dsh --dump-config` 退出码为 1）。
+
+### 仍待验证
+- 实际启动整合包（`dsh web` 起来 + 浏览器自动打开）。
+- 技能/插件开关的实际生效效果（格式已获官方 dump 印证，但没点过开关）。
+- `PageDshManager` 在 UI 线程调用 `WaitForExit()` 是否卡顿。
+
+---
+
 ## [v0.3.1] — 2026-09-24
 
 **实机运行验证后的 bug 修复**。本轮真正启动了编译产物并跟日志排查，共发现并修掉 3 个会导致功能不可用的缺陷。

@@ -54,12 +54,19 @@
                     </x:Array>
                 </local:MyListItem.Buttons>
             </local:MyListItem>
+            <!-- 
+                注意（实机踩坑）：本 StackPanel 的下标必须与 FormMain.PageSubType 的数值严格一致，
+                PageChange 会用 CType(PanItem.Children(SubType), MyListItem) 去勾选。
+                所以这里【绝对不能】插入 TextBlock 分组标题占位——曾经加过一个「DeepSeekHarness」标题，
+                导致 ItemDsh 落到下标 8 而 DownloadDsh = 7，切换下载页时取到 TextBlock 强转 MyListItem，
+                直接抛 InvalidCastException 把程序打崩。
+            -->
             <TextBlock Text="DeepSeekHarness" Margin="13,20,5,4" Opacity="0.6" FontSize="12" />
-            <local:MyListItem x:Name="ItemDsh" Type="RadioBox" IsScaleAnimationEnabled="False" Tag="7" MinPaddingRight="35" Height="36" VerticalAlignment="Top" Title="DSH 版本"
+            <local:MyListItem x:Name="ItemDsh" Type="RadioBox" IsScaleAnimationEnabled="False" Tag="8" MinPaddingRight="35" Height="36" VerticalAlignment="Top" Title="DSH 版本"
                           LogoScale="0.85" Logo="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64z m0 96c194.4 0 352 157.6 352 352S706.4 864 512 864 160 706.4 160 512 317.6 160 512 160z M512 320a64 64 0 1 0 0 128 64 64 0 0 0 0-128z m0 192a48 48 0 0 0-48 48v160a48 48 0 0 0 96 0V560a48 48 0 0 0-48-48z">
                 <local:MyListItem.Buttons>
                     <x:Array Type="{x:Type local:MyIconButton}">
-                        <local:MyIconButton Tag="7" ToolTip="刷新" LogoScale="0.85" Click="Refresh_Click" Logo="M512.0 838.3c-80.2 0-153.4-29.3-210.2-77.4l75.5-75.5c11.5-11.5 25.8-22.0 25.8-37.0a27.2 27.2 0 0 0-27.1-27.1H104.0c-27.1 0-27.1 23.9-27.1 27.1v271.9a27.1 27.1 0 0 0 27.1 27.1c15.0 0 27.8-16.6 42.5-31.2l77.9-77.9c76.6 67.7 177.1 108.9 287.4 108.9 221.7 0 404.5-166.0 431.2-380.6h-109.8c-25.9 154.2-159.7 271.9-321.3 271.9zM919.9 76.6c-15.0 0-27.8 16.6-42.5 31.3L799.5 185.8c-76.5-67.7-177.1-108.9-287.4-108.9-221.8 0-404.5 166.1-431.3 380.6H190.6c25.9-154.2 159.7-271.9 321.4-271.9 80.2 0 153.4 29.3 210.1 77.4l-75.5 75.5c-11.6 11.5-25.8 22.0-25.8 37.1a27.2 27.2 0 0 0 27.1 27.1h271.9c27.1 0 27.1-23.9 27.1-27.1V103.8a27.1 27.1 0 0 0-27.1-27.1z" />
+                        <local:MyIconButton Tag="8" ToolTip="刷新" LogoScale="0.85" Click="Refresh_Click" Logo="M512.0 838.3c-80.2 0-153.4-29.3-210.2-77.4l75.5-75.5c11.5-11.5 25.8-22.0 25.8-37.0a27.2 27.2 0 0 0-27.1-27.1H104.0c-27.1 0-27.1 23.9-27.1 27.1v271.9a27.1 27.1 0 0 0 27.1 27.1c15.0 0 27.8-16.6 42.5-31.2l77.9-77.9c76.6 67.7 177.1 108.9 287.4 108.9 221.7 0 404.5-166.0 431.2-380.6h-109.8c-25.9 154.2-159.7 271.9-321.3 271.9zM919.9 76.6c-15.0 0-27.8 16.6-42.5 31.3L799.5 185.8c-76.5-67.7-177.1-108.9-287.4-108.9-221.8 0-404.5 166.1-431.3 380.6H190.6c25.9-154.2 159.7-271.9 321.4-271.9 80.2 0 153.4 29.3 210.1 77.4l-75.5 75.5c-11.6 11.5-25.8 22.0-25.8 37.1a27.2 27.2 0 0 0 27.1 27.1h271.9c27.1 0 27.1-23.9 27.1-27.1V103.8a27.1 27.1 0 0 0-27.1-27.1z" />
                     </x:Array>
                 </local:MyListItem.Buttons>
             </local:MyListItem>

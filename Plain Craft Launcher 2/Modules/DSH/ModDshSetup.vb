@@ -96,7 +96,8 @@ Public Module ModDshSetup
                                                       "现在安装吗？也可以在「下载 → DSH 版本」里挑选其它版本。", "首次启动引导（2/2）", "安装推荐版本", "稍后自己选")
                                 End Sub)
                     If Choice = 1 Then
-                        DshVersionInstallLoader.Start(DshDefaultVersion, IsForceRestart:=True)
+                        DshRequestVersionInstall(DshDefaultVersion)
+                        DshVersionInstallLoader.Start(0, IsForceRestart:=True)
                         DshVersionInstallLoader.WaitForExit()
                         If DshVersionInstallLoader.State = LoadState.Finished Then NeedVersion = False
                     End If

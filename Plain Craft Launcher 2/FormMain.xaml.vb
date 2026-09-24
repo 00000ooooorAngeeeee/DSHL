@@ -1223,9 +1223,9 @@ Public Class FormMain
         DownloadResourcePack = 5
         DownloadShader = 6
         ''' <summary>
-        ''' DSH 版本下载（DSH 魔改新增，下标 7，必须与 PageDownloadLeft 的 StackPanel 下标一致）。
+        ''' DSH 版本下载（DSH 魔改新增，下标 8，必须与 PageDownloadLeft 的 StackPanel 下标一致）。
         ''' </summary>
-        DownloadDsh = 7
+        DownloadDsh = 8
         SetupLaunch = 0
         SetupLink = 1
         SetupUI = 2
