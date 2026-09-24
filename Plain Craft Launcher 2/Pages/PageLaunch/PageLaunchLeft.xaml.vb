@@ -631,13 +631,24 @@ Finish:
         '实际的启动
         If DshModeEnabled() Then
             '=== DSH 模式：启动 DeepSeekHarness ===
-            If BtnLaunch.Text = "下载 dsh" Then
-                FrmMain.PageChange(FormMain.PageType.Download, FormMain.PageSubType.DownloadDsh)
-                Return
-            End If
-            If DshIsRunning Then
-                '已在运行：直接再打开一次浏览器
-                If DshWebUrl <> "" Then DshOpenBrowser(DshWebUrl)
+            '按钮文案决定行为（与 RefreshDshButtonsUI 的四态保持一致）
+            Select Case BtnLaunch.Text
+                Case "下载 dsh"
+                    FrmMain.PageChange(FormMain.PageType.Download, FormMain.PageSubType.DownloadDsh)
+                    Return
+                Case "新建整合包"
+                    DshNewInstanceWizard()
+                    RefreshButtonsUI()
+                    Return
+                Case "打开 DeepSeekHarness"
+                    '服务已在运行，再开一次浏览器即可
+                    DshOpenBrowser(If(DshWebUrl <> "", DshWebUrl, DshLocalUrl(DshInstanceSelected.Port)))
+                    Return
+            End Select
+            If DshInstanceSelected Is Nothing Then
+                '兜底：不该走到这里，但别让用户卡住
+                DshNewInstanceWizard()
+                RefreshButtonsUI()
                 Return
             End If
             DshLaunchStart(DshInstanceSelected)

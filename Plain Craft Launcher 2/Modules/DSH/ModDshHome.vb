@@ -32,18 +32,22 @@ Public Module ModDshHome
         End If
         DirectoryUtils.Create(ProfileDir)
 
-        '尝试用 dsh 初始化（需要该版本已安装）
-        Dim Inited As Boolean = False
+        '尝试用 dsh 自己初始化（需要该版本已安装）
+        '实测结论（2026-09-24 验证）：
+        '   web / headless 等是「官方内置 profile」，不能用 --from-default-profile 作为自定义 profile 目标
+        '   （会报 "profile web is shipped and cannot be a custom profile target"）。
+        '   正确做法是直接 boot 它，dsh 会在首次使用时从内置模板自动初始化出
+        '   package.json / cordis.yml / cordis.patch.yml / pnpm-workspace.yaml。
+        '   这里用 --dump-config：只组装配置并打印，不真正启动 web 服务，也不占端口。
         If DshVersionInstalled(Instance.DshVersion) AndAlso DshNodeExe IsNot Nothing Then
             Try
-                DshLog($"正在用 dsh 初始化 profile 模板：{Instance.Profile}", Loader)
-                Dim Args As String = $"""{DshBinJs(Instance.DshVersion)}"" --from-default-profile {Instance.Profile} --dump-config"
+                DshLog($"正在用 dsh 初始化 profile：{Instance.Profile}", Loader)
+                Dim Args As String = $"""{DshBinJs(Instance.DshVersion)}"" --profile {Instance.Profile} --dump-config"
                 Dim Info As ProcessStartInfo = DshNewStartInfo(DshNodeExe, Args, Instance.PathInstance)
                 DshApplyEnvironment(Info, Instance.PathDshHome, DshRuntimeRootEffective)
-                Dim Text As String = DshRunInfo(Info, 60000)
-                If Text IsNot Nothing AndAlso Text.Trim().Length > 0 Then
-                    Inited = FileUtils.Exists(ProfileDir & "package.json")
-                End If
+                '注意：dsh --dump-config 实测退出码为 1（输出正常），所以不能依赖退出码，
+                '直接看 profile 文件是否被生成即可；DshRunInfo 对非零退出码只是记录警告。
+                DshRunInfo(Info, 120000)
             Catch ex As Exception
                 Logger.Warn(ex, "用 dsh 初始化 profile 失败，将使用内置模板")
             End Try
@@ -530,8 +534,10 @@ Public Module ModDshHome
             Text = Buffer.ToString()
         End SyncLock
         If Proc.ExitCode <> 0 Then
+            '注意：dsh 的部分命令（实测 --dump-config）在正常输出时也会返回非零退出码，
+            '所以这里只记录警告，把「是否成功」的判断权交给调用方（通常看产出文件是否存在）。
             Dim Tail As String = Text.Split({vbCrLf, vbLf}, StringSplitOptions.RemoveEmptyEntries).Reverse().Take(8).Reverse().Join(vbCrLf)
-            Throw New Exception($"命令失败（退出码 {Proc.ExitCode}）：{vbCrLf}{Tail}")
+            Logger.Warn($"dsh 命令返回非零退出码 {Proc.ExitCode}。输出末尾：{vbCrLf}{Tail}")
         End If
         Return Text
     End Function

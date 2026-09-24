@@ -5,6 +5,55 @@
 
 ---
 
+## [v0.3.1] — 2026-09-24
+
+**实机运行验证后的 bug 修复**。本轮真正启动了编译产物并跟日志排查，共发现并修掉 3 个会导致功能不可用的缺陷。
+
+### 修复
+1. **启动页「新建整合包」按钮点了没反应（死循环）**
+   实机日志证据：
+   ```
+   按 下 按 钮：新建整合包
+   普通弹窗：无法启动 → 还没有任何整合包，请先在「启动」页新建一个……
+   ```
+   `RefreshDshButtonsUI` 在没有整合包时把按钮文案设为「新建整合包」，但 `LaunchButtonClick`
+   没有对应分支，落到 `DshLaunchStart(Nothing)` 弹出"无法启动"。现在按钮文案即行为：
+   「下载 dsh」→ 版本下载页、「新建整合包」→ 新建向导、「打开 DeepSeekHarness」→ 再开浏览器、
+   其余 → 启动。并加了兜底分支。
+2. **profile 初始化命令错误，必然失败**（`DshEnsureProfile`）
+   原来是 `--from-default-profile <name> --dump-config`，实测报：
+   `dsh: profile "web" is shipped and cannot be a custom profile target; omit --from-default-profile to use it`。
+   `web` / `headless` 是官方内置 profile，不能用 `--from-default-profile` 作为自定义目标。
+   正确做法是直接 boot（会从内置模板自动初始化），改为 `--profile <name> --dump-config`，
+   实测能生成 `package.json` / `cordis.yml` / `cordis.patch.yml` / `pnpm-workspace.yaml`。
+3. **`DshRunInfo` 把非零退出码当失败**（`ModDshHome`）
+   实测 `dsh --profile web --dump-config` **输出正常但退出码为 1**。原实现会抛异常，
+   导致 profile 初始化每次都走不到"成功"分支。现在只记录警告，成功与否交给调用方按产出文件判断。
+
+### 变更
+- 首次启动引导不再强制创建整合包（原来会在引导里弹出创建向导），改为「Node → dsh 版本」两步，
+  整合包交由启动页按钮创建，流程更线性、也可随时中断。
+- `ModBase.vb`：版本号 `0.3.0` → `0.3.1`。
+
+### 实机验证记录（本轮已确认可用）
+- 编译产物可正常启动：进程稳定、主窗口出现（`Plain Craft Launcher　`，900×550）、无异常日志。
+- `ModDshInstance` 整合包扫描加载器正常工作（`整合包列表加载完成，共 0 个`）。
+- 首次启动引导弹窗正常触发并能走完流程。
+- 版本列表数据链路实测：npm 26 个版本 + GitHub 21 个 release → 合并 **28 个版本**，
+  分类 alpha 13 / rc 15 / stable 0，发布时间倒序正确（最新 `0.1.7-rc.1` = 2026-09-23 21:30 本地时区）；
+  自动识别出 2 个「GitHub 有 tag 但 npm 未发布」的版本并会在界面上标注为不可安装。
+- npm 安装命令实测通过：官方源 584 包 / 国内镜像 585 包，dry-run 54s / 44s，
+  真实安装 `0.1.7-rc.1` 用时 62.7s（512 包），`lib\bin.js` 入口存在且可执行。
+- **插件开关实现所依赖的 patch 格式得到官方 dump 印证**：
+  `dsh --dump-config` 输出正是 `- id: xxx` / `name: '@deepseek-ai/...'` / `disabled: true` 结构。
+
+### 仍待验证
+- 实际启动一个整合包（`dsh web`）与浏览器自动打开的全链路。
+- 技能/插件开关的实际生效效果。
+- `PageDshManager` 在 UI 线程调用 `WaitForExit()` 是否会卡顿。
+
+---
+
 ## [v0.3.0] — 2026-09-24
 
 ### 新增（DSH 基础设施，7 个新模块）

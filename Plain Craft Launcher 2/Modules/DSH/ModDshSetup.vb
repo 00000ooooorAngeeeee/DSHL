@@ -37,8 +37,7 @@ Public Module ModDshSetup
                 Dim NeedNode As Boolean = Not DshNodeReady()
                 Dim Installed As List(Of String) = DshInstalledVersions()
                 Dim NeedVersion As Boolean = Installed.Count = 0
-                Dim NeedInstance As Boolean = DshInstanceList.Count = 0
-                If Not (NeedNode OrElse NeedVersion OrElse NeedInstance) Then
+                If Not (NeedNode OrElse NeedVersion) Then
                     '环境完整，标记已完成
                     DshSetSetting("DshSetupFinished", True)
                     Return
@@ -49,7 +48,7 @@ Public Module ModDshSetup
                     RunInUiWait(Sub()
                                     MyMsgBox("欢迎使用 DeepSeekHarness 启动器！" & vbCrLf & vbCrLf &
                                              "这是一个由 PCL2 改造而来的启动器，用来管理和启动 DeepSeekHarness（dsh）。" & vbCrLf & vbCrLf &
-                                             "接下来会用几步帮你把运行环境准备好。", "首次启动引导", "开始", "跳过")
+                                             "接下来会用两步帮你把运行环境准备好。", "首次启动引导", "开始", "跳过")
                                 End Sub)
                 End If
 
@@ -61,7 +60,7 @@ Public Module ModDshSetup
                                                       "dsh 是 Node.js 程序，必须有 node.exe 才能运行。" & vbCrLf &
                                                       "本机尚未检测到 Node.js。" & vbCrLf & vbCrLf &
                                                       "是否现在从 npmmirror 镜像自动下载？" & vbCrLf &
-                                                      "（会安装到 " & DshRuntimeRoot & "）", "首次启动引导（1/3）", "自动下载", "我自己指定", "跳过")
+                                                      "（会安装到 " & DshRuntimeRoot & "）", "首次启动引导（1/2）", "自动下载", "我自己指定", "跳过")
                                 End Sub)
                     Select Case Choice
                         Case 1
@@ -94,7 +93,7 @@ Public Module ModDshSetup
                                     Choice = MyMsgBox("第 2 步：安装 dsh 本体" & vbCrLf & vbCrLf &
                                                       "版本仓库里还没有任何 dsh 版本。" & vbCrLf &
                                                       "推荐先安装内置推荐版本 " & DshDefaultVersion & "（RC 候选版，相对稳定）。" & vbCrLf & vbCrLf &
-                                                      "现在安装吗？也可以在「下载 → DSH 版本」里挑选其它版本。", "首次启动引导（2/3）", "安装推荐版本", "稍后自己选")
+                                                      "现在安装吗？也可以在「下载 → DSH 版本」里挑选其它版本。", "首次启动引导（2/2）", "安装推荐版本", "稍后自己选")
                                 End Sub)
                     If Choice = 1 Then
                         DshVersionInstallLoader.Start(DshDefaultVersion, IsForceRestart:=True)
@@ -103,17 +102,11 @@ Public Module ModDshSetup
                     End If
                 End If
 
-                '4. 整合包
-                If Not NeedNode AndAlso Not NeedVersion AndAlso NeedInstance Then
-                    RunInUi(Sub() DshNewInstanceWizard())
-                End If
-
                 '收尾
-                Dim AllReady As Boolean = DshNodeReady() AndAlso DshInstalledVersions().Count > 0 AndAlso DshInstanceList.Count > 0
-                If AllReady Then
+                If DshNodeReady() AndAlso DshInstalledVersions().Count > 0 Then
                     DshSetSetting("DshSetupFinished", True)
                     RunInUi(Sub()
-                                Hint("运行环境已就绪，可以开始使用 DeepSeekHarness 了！", HintType.Green)
+                                Hint("运行环境已就绪！点「新建整合包」创建第一个整合包即可开始使用。", HintType.Green)
                                 FrmLaunchLeft?.RefreshButtonsUI()
                             End Sub)
                 End If
