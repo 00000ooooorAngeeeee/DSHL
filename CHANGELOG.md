@@ -5,7 +5,95 @@
 
 ---
 
-## [v0.6.3] — 2026-09-24
+## [v0.7.0] — 2026-09-24
+
+### 修复：插件"似乎不会真的安装"（用户反馈）+ 插件包名难找
+
+#### 根因一：机器上没有 pnpm
+`dsh plugin` 是把参数**透传给 pnpm** 的，所以 pnpm 是插件功能的硬依赖。实测证据链：
+```
+dsh plugin --profile web add dshmarket
+→ 'pnpm' is not recognized as an internal or external command
+→ dsh: plugin command failed; diagnostics: ...\.plugin-manager\logs\...\pnpm.log
+```
+pnpm 自己的日志写得更直白：
+```
+Command failed with exit code 1: pnpm add "dsh plugin --profile web add dshmarket"
+```
+——**整条命令被当成了一个包名**。dsh 源码里也有对应分支：
+`exitCode === 127 → "pnpm was not found; install pnpm and make it available on PATH"`。
+
+#### 根因二：参数被二次解析
+原来我把命令行拼成一个字符串交给 `ProcessStartInfo.Arguments`，被 Windows 再解析一次后粘连。
+**修法**：`DshRunCliArgs` + `DshQuoteArgs` 按 Windows 规则手工转义后传字符串。
+> 注意：.NET Framework 4.8 **没有** `ProcessStartInfo.ArgumentList`（.NET Core 2.1+ 才有），
+> 直接写会报 `BC30456 不是 ProcessStartInfo 的成员`，必须自己实现转义。
+
+#### 根因三：装完在界面上看不到
+`dsh plugin add` 成功后会**自动把包名写进 `dsh.profile.bundles`**（实测确认），
+而扫描逻辑把"在 bundles 里"一律当内置包隐藏 → 新装的插件列表里没有。
+
+> ⚠️ 这里我第一版的修法是**错的且有更严重后果**：我让安装后把包名从 bundles 摘掉。
+> 但 dshmarket 的 package.json 写着 `"dsh": { "bundle": { "patch": "./cordis.patch.yml" } }`
+> —— 它是 **bundle 类型插件**，bundles 就是它的**加载入口**，摘掉等于装了不加载。
+> 正确修法：维护框架自带的基础 bundle 白名单（dsh-base / dsh-web-app / dsh-app-boot），
+> 只有白名单内的算内置；bundles 里其余条目照常当用户插件列出。
+
+### 新增：pnpm 自动准备（装进整合包自己的目录）
+新增 `DshEnsurePnpm`：优先用 Node 自带的 **corepack**
+（`corepack enable --install-directory <DSH_HOME>\pnpm pnpm`，并把 `COREPACK_HOME` 指向
+`<DSH_HOME>\corepack`），把 pnpm 装到**整合包自己的目录** —— 不污染系统，删除整合包即彻底卸载。
+corepack 不可用时才退回 `npm install -g pnpm`。
+
+### 新增：pnpm store 隔离（整合包之间互不影响）
+pnpm 默认把内容寻址仓库放在 `<DSH_HOME 所在盘>\.pnpm-store`，
+实测落到了 **`E:\DSHarness\.pnpm-store` —— 用户全局 DSH 的 store**，破坏隔离。
+三种方式实测对比：
+
+| 方式 | 结果 |
+|---|---|
+| 环境变量 `npm_config_store_dir` | ✘ pnpm 12 不认 |
+| 环境变量 `PNPM_STORE_DIR` | ✘ 不认 |
+| profile 的 `.npmrc` | ✘ 不认 |
+| **命令行 `--store-dir`** | ✔ **生效** |
+
+→ 以 `dsh plugin --profile web --store-dir <DSH_HOME>\pnpm-store add <包>` 透传。
+
+### 新增：找插件（解决"包名通常很难找"）
+「安装插件…」改成先给三条路：
+1. **搜索** —— 按关键词搜 npm registry（沿用设置里的 `DshNpmSource` 源），列出候选让你挑；
+   并用 keywords 含 `dsh-plugin` / 带 `dsh` 字段来判断"像不像 dsh 插件"并优先排序
+2. **推荐** —— 一键装 `dshmarket`（社区做的可视化插件市场，装完在 dsh 界面里逛，彻底不用记包名）
+3. **手动输入** —— 已知包名时
+
+搜索无结果或接口不通时，会兜底给推荐清单，不会让用户卡住。
+
+### 实机验证
+```
+搜索 "dsh market" → 25304 命中，dshmarket 等被正确标记为【像 dsh 插件】
+dsh plugin --profile web --store-dir <DSH_HOME>\pnpm-store add dshmarket
+  → + dshmarket 1.58.0   Done in 1.7s using pnpm v12.6.0
+  → node_modules/dshmarket 存在 ✔
+  → 整合包自己的 store 生成 6.17 MB ✔（全局 store 时间戳未变）
+启动器界面：共 4 个插件 · profile: web · 启用 4 / 关闭 0
+  ▸ dshmarket  v1.58.0  Visual plugin market inside DeepSeek Harness …
+```
+
+### 变更
+- `ModDshBase.vb`：`DshApplyEnvironment` 把整合包自己的 pnpm shim 目录加入 PATH；
+  新增 `DshPnpmShimDir` / `DshPnpmExe` / `DshPnpmReady` / `DshEnsurePnpm`。
+- `ModDshHome.vb`：新增 `DshRunCliArgs` / `DshQuoteArgs` / `DshPnpmStoreDir` /
+  `DshPluginSearchItem` / `DshNpmRegistryUrl` / `DshSearchPlugins` / `DshRecommendedPlugins`；
+  `DshInstallPlugin` / `DshRemovePlugin` 改为数组传参 + 先备 pnpm + 传 `--store-dir`；
+  `DshScanPlugins` 改用基础 bundle 白名单；`DshRemoveFromProfileBundles` 收回为"只清理历史遗留"。
+- `PageDshManager.xaml.vb`：`PluginAdd_Click` 改为三选一入口，新增
+  `ManualInstallPlugin` / `SearchAndInstallPlugin` / `InstallPluginByName`。
+- `ModBase.vb`：版本号 `0.6.3` → `0.7.0`。
+- `DEVNOTES.md`：新增 4 条（#88 pnpm 是硬依赖 + 数组传参 + net48 没有 ArgumentList、
+  #89 store 只能靠 `--store-dir`、#90 **别把插件从 bundles 摘掉**、#91 插件识别与 registry 沿用）；
+  顺带修正了文首"启动器版本"一直停留在 `v0.3.9` 的旧值。
+
+---
 
 ### 改进：整合包卡片的按钮行改为自适应（窄窗口不再被裁切，用户反馈）
 原来那行 5 个按钮是固定列数的 `Grid`（`Width="Auto"` × 5 + `SharedSizeGroup="Button"`），

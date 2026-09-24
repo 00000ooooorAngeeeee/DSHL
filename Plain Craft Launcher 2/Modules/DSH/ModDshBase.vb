@@ -436,11 +436,26 @@ Public Module ModDshBase
         '隔离根目录
         Info.EnvironmentVariables("DSH_HOME") = DshHome
 
+        '★ pnpm：dsh 的插件安装/卸载是把参数**透传给 pnpm** 的（`dsh plugin --profile web add <包名>`），
+        '  所以 pnpm 是插件功能的硬依赖。实机踩坑：系统里没有 pnpm 时 dsh 会回 exitCode 127 并提示
+        '  "pnpm was not found; install pnpm and make it available on PATH"；
+        '  用户看到的现象就是"点安装没什么反应 / 似乎不会真的安装"。
+        '  这里把"启动器为该整合包准备的 pnpm shim 目录"塞到 PATH 最前。
+        Dim PnpmDir As String = DshPnpmShimDir(DshHome)
+        If Not String.IsNullOrEmpty(PnpmDir) AndAlso DirectoryUtils.Exists(PnpmDir) Then
+            Info.EnvironmentVariables("PNPM_HOME") = PnpmDir
+            '注意：store 位置**不能**靠环境变量指定 —— 实测 npm_config_store_dir / PNPM_STORE_DIR
+            'pnpm 12 都不认（仍然会用全局 store）。所以改由调用方以 `--store-dir` 透传给 pnpm，
+            '见 ModDshHome.DshPnpmStoreDir 的说明。
+        End If
+
         '把 Node 目录放到 PATH 最前，保证 dsh 与 pnpm 能找到 node
         Dim OldPath As String = Info.EnvironmentVariables("Path")
         If OldPath Is Nothing Then OldPath = Environment.GetEnvironmentVariable("PATH")
         If OldPath Is Nothing Then OldPath = ""
-        Dim Parts As New List(Of String) From {NodeRoot}
+        Dim Parts As New List(Of String)
+        If Not String.IsNullOrEmpty(PnpmDir) Then Parts.Add(PnpmDir)
+        Parts.Add(NodeRoot)
         Parts.AddRange(OldPath.Split(";"c))
         Info.EnvironmentVariables("Path") = Parts.Where(Function(p) Not String.IsNullOrWhiteSpace(p)).Distinct().Join(";"c)
 
@@ -450,6 +465,119 @@ Public Module ModDshBase
         '可选：关闭遥测
         If DshSetting("DshDisableTelemetry", True) Then Info.EnvironmentVariables("DSH_TELEMETRY_DISABLED") = "1"
     End Sub
+
+#End Region
+
+#Region "pnpm 引导（插件安装的前置依赖）"
+
+    ''' <summary>
+    ''' 该整合包专属的 pnpm shim 目录（放在它自己的 DSH_HOME 下，随整合包一起隔离、可随时删除）。
+    ''' </summary>
+    Public Function DshPnpmShimDir(DshHome As String) As String
+        If String.IsNullOrEmpty(DshHome) Then Return ""
+        Return PathUtils.AddSlashSuffix(DshHome) & "pnpm\"
+    End Function
+
+    ''' <summary>该整合包是否已经有可用的 pnpm（自己目录里的 shim 优先，其次系统 PATH 上的）。</summary>
+    Public Function DshPnpmReady(DshHome As String) As Boolean
+        Return DshPnpmExe(DshHome) <> ""
+    End Function
+
+    ''' <summary>
+    ''' 找到一个可用的 pnpm 可执行文件路径；找不到返回 ""。
+    ''' 查找顺序：① 整合包自己目录里的 shim ② 系统 PATH。
+    ''' </summary>
+    Public Function DshPnpmExe(DshHome As String) As String
+        '① 整合包自己的 shim
+        Dim Dir As String = DshPnpmShimDir(DshHome)
+        If Not String.IsNullOrEmpty(Dir) Then
+            For Each N As String In {"pnpm.cmd", "pnpm.exe", "pnpm.bat", "pnpm"}
+                If FileUtils.Exists(Dir & N) Then Return Dir & N
+            Next
+        End If
+        '② 系统 PATH（用户可能自己装过）
+        Try
+            For Each P As String In Environment.GetEnvironmentVariable("PATH").Split(";"c)
+                If String.IsNullOrWhiteSpace(P) Then Continue For
+                For Each N As String In {"pnpm.cmd", "pnpm.exe", "pnpm.bat"}
+                    Dim Full As String = PathUtils.AddSlashSuffix(P.Trim()) & N
+                    If FileUtils.Exists(Full) Then Return Full
+                Next
+            Next
+        Catch
+        End Try
+        Return ""
+    End Function
+
+    ''' <summary>
+    ''' 为某个整合包准备 pnpm（装到它自己的 DSH_HOME 下，不污染系统）。
+    ''' 优先用 Node 自带的 corepack（`corepack enable --install-directory`），
+    ''' 这样 pnpm 落在整合包目录里，**删除整合包就等于彻底卸载**。
+    ''' 失败再退回 `npm install -g pnpm`（此时需要用户知情，调用方负责先确认）。
+    ''' 必须在后台线程调用（会跑命令行）。
+    ''' </summary>
+    Public Function DshEnsurePnpm(Loader As LoaderBase, DshHome As String) As String
+        Dim Existing As String = DshPnpmExe(DshHome)
+        If Existing <> "" Then Return Existing
+
+        Dim NodeDirs As String = DshRuntimeRootEffective
+        Dim ShimDir As String = DshPnpmShimDir(DshHome)
+        DirectoryUtils.Create(ShimDir)
+
+        '① 首选 corepack：把 pnpm 的 shim 直接生成到整合包目录
+        Dim Corepack As String = ""
+        Try
+            For Each P As String In Environment.GetEnvironmentVariable("PATH").Split(";"c)
+                If String.IsNullOrWhiteSpace(P) Then Continue For
+                Dim C As String = PathUtils.AddSlashSuffix(P.Trim()) & "corepack.cmd"
+                If FileUtils.Exists(C) Then Corepack = C : Exit For
+            Next
+        Catch
+        End Try
+        If Corepack <> "" Then
+            Try
+                DshLog($"正在为该整合包准备 pnpm（corepack → {ShimDir}）", Loader)
+                Dim Info As ProcessStartInfo = DshNewStartInfo(Corepack, "", DshHome)
+                'corepack 的缓存也放进整合包目录，做到完全隔离
+                Info.EnvironmentVariables("COREPACK_HOME") = PathUtils.AddSlashSuffix(DshHome) & "corepack"
+                Info.EnvironmentVariables("COREPACK_ENABLE_DOWNLOAD_PROMPT") = "0"
+                Info.Arguments = $"enable --install-directory ""{PathUtils.RemoveSlashSuffix(ShimDir)}"" pnpm"
+                DshRunInfoWithLoader(Loader, Info, 5 * 60 * 1000)
+                Dim Made As String = DshPnpmExe(DshHome)
+                If Made <> "" Then
+                    DshLog($"pnpm 已就绪（整合包内）：{Made}", Loader)
+                    Return Made
+                End If
+                DshLog("corepack 未能生成 pnpm shim，改试全局安装", Loader)
+            Catch ex As Exception
+                Logger.Warn(ex, "用 corepack 准备 pnpm 失败")
+            End Try
+        End If
+
+        '② 退回 npm 全局安装（会装到用户的全局 npm 目录，属于系统级改动，调用方必须先征求同意）
+        Dim NpmCmd As String = DshNpmCmd
+        If NpmCmd = "" Then Throw New Exception("找不到 npm，无法自动准备 pnpm。请先安装 Node.js（含 npm）")
+        DshLog("正在通过 npm 全局安装 pnpm（这是系统级改动）", Loader)
+        Dim Info2 As ProcessStartInfo = DshNewStartInfo(NpmCmd, "", DshHome)
+        Info2.Arguments = "install -g pnpm"
+        DshRunInfoWithLoader(Loader, Info2, 5 * 60 * 1000)
+
+        '全局装完后，在整合包目录里放一个转发 shim，保证后续环境变量始终能找到它
+        Dim GlobalPnpm As String = DshPnpmExe(DshHome)
+        If GlobalPnpm <> "" AndAlso Not GlobalPnpm.StartsWith(ShimDir, StringComparison.OrdinalIgnoreCase) Then
+            Try
+                FileUtils.Write(ShimDir & "pnpm.cmd", "@echo off" & vbCrLf & $"""{GlobalPnpm}"" %*" & vbCrLf, New UTF8Encoding(False))
+                GlobalPnpm = ShimDir & "pnpm.cmd"
+            Catch ex As Exception
+                Logger.Warn(ex, "生成 pnpm 转发 shim 失败")
+            End Try
+        End If
+        If GlobalPnpm = "" Then Throw New Exception("pnpm 准备失败，请手动执行：npm install -g pnpm")
+        DshLog($"pnpm 已就绪：{GlobalPnpm}", Loader)
+        Return GlobalPnpm
+    End Function
+
+#End Region
 
     ''' <summary>
     ''' 生成一个只含设置项、无副作用的 ProcessStartInfo，用于启动 dsh。
@@ -468,8 +596,6 @@ Public Module ModDshBase
         Info.WorkingDirectory = WorkingDirectory
         Return Info
     End Function
-
-#End Region
 
 #Region "日志"
 

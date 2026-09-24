@@ -323,11 +323,103 @@ Public Class PageDshManager
         Reload()
     End Sub
 
+    ''' <summary>
+    ''' 安装插件。原来是"直接让你手输 npm 包名"，用户反馈**包名很难找**，
+    ''' 所以改成先给三条路：
+    '''   ① 搜索（按关键词搜 npm registry，列出候选让你挑）
+    '''   ② 推荐（一键装 dshmarket —— 可视化插件市场，装上后在 dsh 界面里逛，彻底不用记包名）
+    '''   ③ 手动输入（已经知道包名的情况）
+    ''' 三条路最终都汇到 InstallPluginByName，保证行为一致。
+    ''' </summary>
     Private Sub PluginAdd_Click(sender As Object, e As MouseButtonEventArgs)
         If Instance Is Nothing Then Return
-        Dim Name As String = MyMsgBoxInput("安装插件", "输入 npm 包名（例如 @deepseek-ai/dsh-plugin-demo）。" & vbCrLf &
+        If Not Instance.IsVersionInstalled Then
+            MyMsgBox($"请先安装该整合包绑定的 dsh {Instance.DshVersion}，然后才能管理插件。", "还不能装插件", IsWarn:=True)
+            Return
+        End If
+        Dim Choice As Integer? = MyMsgBoxSelect(
+            New ObjectModel.Collection(Of IMyRadio) From {
+                New MyRadioBox With {.Text = "搜索插件（按关键词搜 npm，然后从结果里挑）"},
+                New MyRadioBox With {.Text = "安装插件市场 dshmarket（推荐：装完在 dsh 里逛市场，不用记包名）"},
+                New MyRadioBox With {.Text = "手动输入包名（我已经知道包名）"}
+            }, "安装插件", "下一步", "取消")
+        If Choice Is Nothing Then Return
+        Select Case Choice.Value
+            Case 0 : SearchAndInstallPlugin()
+            Case 1 : InstallPluginByName("dshmarket")
+            Case 2 : ManualInstallPlugin()
+        End Select
+    End Sub
+
+    ''' <summary>路径③：手动输入包名。</summary>
+    Private Sub ManualInstallPlugin()
+        Dim Name As String = MyMsgBoxInput("安装插件", "输入 npm 包名（例如 dshmarket）。" & vbCrLf &
                                            "会通过 dsh plugin 装到这个整合包的 profile 里，需要联网。", "",
                                            New ObjectModel.Collection(Of Validate) From {New ValidateFunc(Function(v As String) If(String.IsNullOrWhiteSpace(v), "不能为空", Nothing))})
+        If String.IsNullOrWhiteSpace(Name) Then Return
+        InstallPluginByName(Name.Trim())
+    End Sub
+
+    ''' <summary>路径①：按关键词搜索 npm，再从结果里挑一个安装。</summary>
+    Private Sub SearchAndInstallPlugin()
+        Dim Keyword As String = MyMsgBoxInput("搜索插件", "输入关键词（例如 dsh market、dsh plugin、deepseek）。" & vbCrLf &
+                                             "会在 npm registry 里搜索，然后从结果里挑。", "",
+                                             New ObjectModel.Collection(Of Validate) From {New ValidateFunc(Function(v As String) If(String.IsNullOrWhiteSpace(v), "不能为空", Nothing))})
+        If String.IsNullOrWhiteSpace(Keyword) Then Return
+        Keyword = Keyword.Trim()
+        Hint($"正在搜索：{Keyword}", HintType.Blue)
+
+        RunInThread(
+        Sub()
+            Dim Items As List(Of DshPluginSearchItem) = Nothing
+            Dim Err As String = ""
+            Try
+                Items = DshSearchPlugins(Keyword)
+            Catch ex As Exception
+                Err = ex.Message
+                Logger.Warn(ex, $"搜索插件失败：{Keyword}")
+            End Try
+            RunInUi(
+            Sub()
+                Try
+                    If Items Is Nothing OrElse Items.Count = 0 Then
+                        '搜索不通或没结果时，给推荐清单兜底，别让用户卡住
+                        Dim Tip As String = If(Err <> "", "搜索失败：" & Err & vbCrLf & vbCrLf, "没有搜到结果。" & vbCrLf & vbCrLf)
+                        Dim Fallback As Integer? = MyMsgBoxSelect(
+                            New ObjectModel.Collection(Of IMyRadio) From {
+                                New MyRadioBox With {.Text = "dshmarket —— 可视化插件市场（推荐）"},
+                                New MyRadioBox With {.Text = "改成手动输入包名"}
+                            }, Tip & "要改成下面哪种方式？", "确定", "取消")
+                        If Fallback Is Nothing Then Return
+                        If Fallback.Value = 0 Then InstallPluginByName("dshmarket") Else ManualInstallPlugin()
+                        Return
+                    End If
+                    Dim Controls As New ObjectModel.Collection(Of IMyRadio)
+                    For Each It As DshPluginSearchItem In Items.Take(20)
+                        Dim Desc As String = If(It.Description, "").Trim()
+                        If Desc.Length > 60 Then Desc = Desc.Substring(0, 60) & "…"
+                        Dim Mark As String = If(It.LooksLikePlugin, "【像 dsh 插件】", "")
+                        Controls.Add(New MyRadioBox With {
+                            .Text = $"{It.PackageName}  ({It.Version}) {Mark}" & If(Desc = "", "", "　" & Desc),
+                            .Tag = It
+                        })
+                    Next
+                    Dim Picked As Integer? = MyMsgBoxSelect(Controls, $"搜索结果（共 {Items.Count} 个，最多显示 20）", "安装这个", "取消")
+                    If Picked Is Nothing Then Return
+                    Dim Box As MyRadioBox = TryCast(Controls(Picked.Value), MyRadioBox)
+                    If Box Is Nothing Then Return
+                    Dim Chosen As DshPluginSearchItem = TryCast(Box.Tag, DshPluginSearchItem)
+                    If Chosen Is Nothing Then Return
+                    InstallPluginByName(Chosen.PackageName)
+                Catch ex As Exception
+                    Logger.Error(ex, "处理搜索结果失败")
+                End Try
+            End Sub)
+        End Sub)
+    End Sub
+
+    ''' <summary>三条路径共用的实际安装动作。</summary>
+    Private Sub InstallPluginByName(Name As String)
         If String.IsNullOrWhiteSpace(Name) Then Return
         Name = Name.Trim()
         RunInThread(

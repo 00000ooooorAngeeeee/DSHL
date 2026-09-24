@@ -4,7 +4,7 @@
 > 记录**目标、约束、已核实的外部事实、避坑清单、进度**。
 > 改动前请先读 §7 的"工作流程"，并遵守 §8 的"注意事项"。
 
-最后更新：2026-09-24 ・ 启动器版本：`v0.3.9`
+最后更新：2026-09-24 ・ 启动器版本：`v0.7.0`
 
 ---
 
@@ -641,6 +641,56 @@ E:\DeepseekHarnessWP\
       再逐档改窗口宽度读日志。这样任何尺寸下都能客观确认，也顺便留下了回归验证的手段。
     **通用教训：凡"肉眼不好判断/截图不可靠"的 UI 行为，都让控件把关键布局数据打进日志，
       再用改尺寸的方式逐档验证。**
+
+88. **`dsh plugin` 把参数透传给 pnpm，所以 pnpm 是插件功能的硬依赖**（用户实报"似乎不会真的安装"）。
+    实机证据链：
+      · 系统 PATH 上没有 pnpm → 执行 `dsh plugin --profile web add dshmarket` 失败
+      · dsh 自己的诊断日志（profile/.plugin-manager/logs/*/pnpm.log）写着：
+            Command failed with exit code 1: pnpm add "dsh plugin --profile web add dshmarket"
+        —— **整条命令被当成了一个包名**
+      · dsh 源码 plugin.js 里也有对应的提示：
+            if (result.exitCode === 127) process.stderr.write("dsh: pnpm was not found; install pnpm and make it available on PATH.\n")
+    根因两层：
+      ① 机器上根本没装 pnpm（只有 npm 与 corepack）；
+      ② 我把参数拼成一个命令行字符串交给 `ProcessStartInfo.Arguments`，被二次解析后粘连。
+    修法：
+      ① 参数改**按数组传**（`DshRunCliArgs` + `DshQuoteArgs` 手工按 Windows 规则转义）。
+         ⚠ **.NET Framework 4.8 没有 `ProcessStartInfo.ArgumentList`**（那是 .NET Core 2.1+ 的 API），
+           直接写会报 BC30456"不是 ProcessStartInfo 的成员"，必须自己转义。
+      ② `DshEnsurePnpm`：优先用 Node 自带的 **corepack** 把 pnpm 装到**整合包自己的目录**
+         （`corepack enable --install-directory <DSH_HOME>\pnpm pnpm`，并设 `COREPACK_HOME` 到
+          `<DSH_HOME>\corepack`）—— 这样不污染系统、删除整合包即彻底卸载；
+         失败才退回 `npm install -g pnpm`。
+
+89. **pnpm 的 store 位置只能靠命令行 `--store-dir` 指定，环境变量都不认**（隔离必需）。
+    pnpm 默认把内容寻址仓库放在 `<DSH_HOME 所在盘>\.pnpm-store`，实测落到了
+    **`E:\DSHarness\.pnpm-store` —— 用户全局 DSH 的 store**，同一盘上所有整合包共用它，
+    直接破坏"整合包之间隔离"这条铁律。
+    三种方式实测对比：
+      ✘ 环境变量 `npm_config_store_dir` —— pnpm 12 不认（`pnpm store path` 仍返回全局那个）
+      ✘ 环境变量 `PNPM_STORE_DIR`       —— 同样不认
+      ✘ 写 profile 的 `.npmrc`           —— 也不认
+      ✔ **命令行 `--store-dir <路径>`**  —— 生效（生成 `<DSH_HOME>\pnpm-store\v11`）
+    → 所以 `DshPnpmStoreDir()` 返回路径，由 `dsh plugin ... --store-dir <路径> add/remove <包>` 透传。
+
+90. **★ 别把插件从 `dsh.profile.bundles` 里摘掉 —— 那会让它根本不加载。**
+    我第一版想当然地"装完把包名从 bundles 摘掉，好让界面能列出它、也能用 patch 关掉"。
+    **这个判断是错的，而且后果比原 bug 严重**：dshmarket 的 package.json 里写着
+        "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+    说明它是 **bundle 类型插件**，`dsh.profile.bundles` 就是它的加载入口；
+    摘出去 = 装了等于没装。
+    真正的问题是**扫描逻辑**：原来把"在 bundles 里"一律当作内置包隐藏，
+    而 `dsh plugin add` 会把新装的包**自动写进 bundles**（实测确认），
+    于是"装完列表里看不到"。
+    → 正确修法：维护一份**框架自带的基础 bundle 白名单**（dsh-base / dsh-web-app / dsh-app-boot），
+      只有白名单内的才算内置；bundles 里其余条目照常当用户插件列出。
+    **教训：改数据结构的"归属"之前，先确认那个字段是不是这东西的加载入口。**
+
+91. **判断"是不是 dsh 插件"要看 package.json 的 `dsh` 字段或 keywords**：
+    dshmarket 的 `keywords` 含 `dsh-plugin`，且带 `dsh.bundle` 字段。
+    搜索界面用这两条做标记与排序（`LooksLikePlugin`），比只按包名猜准得多。
+    另外搜索 URL 要**沿用用户配置的 registry**（`DshNpmSource`：0=官方 1=国内镜像），
+    否则会出现"安装走镜像、搜索走官方"的割裂（国内直连 registry.npmjs.org 又慢又可能不通）。
 
 ---
 

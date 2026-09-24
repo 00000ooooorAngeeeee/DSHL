@@ -12,7 +12,7 @@ Imports System.Windows.Controls
 ''' 这里补上"把剩余宽度平均分给各子项"的逻辑（子项自身的 Margin 会被算进去）。
 '''
 ''' 用法：直接当容器用即可，不需要设任何属性。
-'''   XAML 里要记得在 .vbproj 的 <Compile Include> 列表里登记本文件（PCL 用的是显式文件列表）。
+'''   XAML 里要记得在 .vbproj 的 Compile Include 列表里登记本文件（PCL 用的是显式文件列表）。
 ''' </summary>
 Public Class MyWrapStretchPanel
     Inherits Panel
