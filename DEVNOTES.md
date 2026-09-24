@@ -493,6 +493,23 @@ E:\DeepseekHarnessWP\
     → 遇到这种"给两个方案让用户选"的情况，用户回一个字母 + 截图，就以**截图为准**去核对，
       不要只按字母推断（截图能确认我理解对了没有，字母不能）。
 
+70. **设置页左栏最终形态：个性化 / DSH 运行环境 / 整合包管理**（用户明确不需要「联机」）。
+    `ItemLink` 保持 PCL 原本的 Collapsed 即可（它本来就被硬编码隐藏）。
+
+71. **`PageSetupLeft.Loaded` 里"默认选中某项"必须让位给显式导航**（用户报的 bug）：
+    从启动页点「整合包管理」会走 `FormMain.PageChange(Setup, SetupManager)`，
+    它已经 `SetChecked(ItemManager)` 了；但紧接着 `PageSetupLeft.Loaded` 又无条件
+    `ItemUI.SetChecked(True)`，把选中项覆盖成「个性化」，右面板也就跟着显示错页。
+    → 修法：用本类已有的 `IsPageSwitched` 标记做守卫（`PageChange` 开头会把它置 True），
+      `If IsPageSwitched Then Return`，即"已经有人明确指定了子页面，就别再改选中项"。
+    **通用教训：初始化代码里"设默认值"的动作，一定要先检查有没有人已经显式设过。**
+
+72. **同一个页面实例被创建两次会造成可感知的卡顿**（用户报"点整合包管理卡顿约 1 秒"）：
+    `BtnVersion_Click` 里已经 `If FrmDshManager Is Nothing Then FrmDshManager = New PageDshManager`，
+    而 `FormMain.PageChange` 的 Setup 分支里我又补了一句同样的创建 —— 于是 `PageDshManager` 被构造两次
+    （每次构造都要读整合包列表、插件、技能等）。删掉 FormMain 里那句后导航耗时从 ~1s 降到 ~0.53s。
+    **教训：同一个对象的"按需创建"只留一处，别在调用链的两端各写一遍。**
+
 ---
 
 ## 8b. 本地构建环境搭建记录（v0.3.0 完成）

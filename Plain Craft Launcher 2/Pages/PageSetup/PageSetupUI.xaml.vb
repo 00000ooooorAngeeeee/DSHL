@@ -440,18 +440,16 @@ Refresh:
         Try
             If Not PageLaunchLeft.DshModeEnabled() Then Return
             If FrmSetupLeft Is Nothing Then Return
-            '隐藏两个 MC 子页面；「个性化」保留可见（用户明确要求：主题/背景等启动器设置他要用）
+            '隐藏三个 MC 子页面；「个性化」保留可见（用户明确要求：主题/背景等启动器设置他要用）
             FrmSetupLeft.ItemLaunch.Visibility = Visibility.Collapsed
             FrmSetupLeft.ItemSystem.Visibility = Visibility.Collapsed
-            '「联机」也保留：PCL 在下面那句里把它硬编码成 Collapsed，
-            '但用户期望的左栏是 联机/个性化/DSH 运行环境/整合包管理，所以这里覆盖回来。
-            '(它是 PCL 的联机页，DSH 模式点进去也只是个空页，但保留更贴近用户要求的形态。)
-            FrmSetupLeft.ItemLink.Visibility = Visibility.Visible
+            '「联机」用户明确说不需要（PCL 本来就在下面那句里把它硬编码为 Collapsed），保持隐藏
+            FrmSetupLeft.ItemLink.Visibility = Visibility.Collapsed
             FrmSetupLeft.ItemUI.Visibility = Visibility.Visible
             FrmSetupLeft.ItemManager.Visibility = Visibility.Visible
             '左栏整体必须保持可见：PCL 有条规则是"可选子页面少于 2 个就把整个左栏收起来"
             '（`FrmSetupLeft.PanItem.Visibility = If(AvaliableCount < 2 ..., Collapsed, Visible)`），
-            '而 DSH 模式下能选的只有 联机/个性化/DSH 运行环境/整合包管理，别让它被误收。
+            'DSH 模式下计入计数的是 个性化 / DSH 运行环境 / 整合包管理 三项，别让它被误收。
             FrmSetupLeft.PanItem.Visibility = Visibility.Visible
         Catch ex As Exception
             Logger.Warn(ex, "收紧设置页左栏显示失败")

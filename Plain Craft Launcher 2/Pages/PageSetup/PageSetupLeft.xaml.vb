@@ -11,7 +11,12 @@ Public Class PageSetupLeft
         '   于是左栏会漏出「启动 / 个性化 / 其他」——用户实测到的那条诡异流程就是这个原因。
         If PageLaunchLeft.DshModeEnabled() Then
             PageSetupUI.DshApplySetupLeftVisibility()
-            '默认选中「个性化」（用户截图里的效果：左栏 联机/个性化/DSH 运行环境/整合包管理，个性化选中）
+            '★ 关键：如果进入设置页时已经明确要显示某个子页面（例如从启动页点「整合包管理」
+            '   → FormMain.PageChange(Setup, SetupManager)，它已经 SetChecked 过 ItemManager），
+            '   就**不要再改选中项**，否则会把管理页覆盖成「个性化」（用户实测到的 bug）。
+            '   IsPageSwitched 是本类里已有的标记，PageChange 会把它置 True。
+            If IsPageSwitched Then Return
+            '默认选中「个性化」（用户截图里的效果）
             If Not Settings.Get(Of Boolean)("UiHiddenSetupUi") Then
                 ItemUI.SetChecked(True, False, False)
             Else

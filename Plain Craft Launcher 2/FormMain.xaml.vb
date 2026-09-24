@@ -1416,10 +1416,10 @@ Public Class FormMain
                 Case PageType.Setup
                     If FrmSetupLeft Is Nothing Then FrmSetupLeft = New PageSetupLeft
                     CType(FrmSetupLeft.PanItem.Children(SubType), MyListItem).SetChecked(True, True, Stack = PageCurrent)
-                    '整合包管理挂在设置页下，但左列表里没有对应条目，所以这里额外把设置页的右面板换掉
-                    If SubType = PageSubType.SetupManager Then
-                        If FrmDshManager Is Nothing Then FrmDshManager = New PageDshManager
-                    End If
+                    '注意（DSH 魔改）：这里**不要**再补一句
+                    '    If SubType = PageSubType.SetupManager Then If FrmDshManager Is Nothing Then FrmDshManager = New PageDshManager
+                    '因为 PageSetupLeft.PageGet/PageChange 里已经会按需创建 FrmDshManager，
+                    '这里多建一次会让 PageDshManager 被构造两次，表现为"点整合包管理卡顿约 1 秒"（用户实测）。
                 Case PageType.Other
                     If FrmOtherLeft Is Nothing Then FrmOtherLeft = New PageOtherLeft
                     CType(FrmOtherLeft.PanItem.Children(SubType), MyListItem).SetChecked(True, True, Stack = PageCurrent)

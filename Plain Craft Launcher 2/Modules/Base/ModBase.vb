@@ -17,7 +17,7 @@ Public Module ModBase
     ' ===== DSH 魔改新增：本魔改版自己的版本号 =====
     ' 规则见 DEVNOTES.md §6：修 bug 进补丁位，加功能进次版本位。
     ' 每次改动都必须同步更新 CHANGELOG.md。
-    Public Const VersionDshBaseName As String = "0.5.0"
+    Public Const VersionDshBaseName As String = "0.5.1"
     ''' <summary>显示在日志与界面上的完整魔改版本号。</summary>
     Public Const VersionDshDisplay As String = "PCL2-DSH " & VersionDshBaseName
 
