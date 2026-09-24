@@ -96,6 +96,19 @@ Public Module ModDshBase
     Private ReadOnly DshSettingCache As New ConcurrentDictionary(Of String, Object)
 
     ''' <summary>
+    ''' DSH 模式是否启用（供启动早期阶段使用，任何异常都当作"启用"）。
+    ''' 为什么不直接用 PageLaunchLeft.DshModeEnabled：那是 Protected，FormMain 里访问不到；
+    ''' 而且启动早期界面尚未建好，必须容错。
+    ''' </summary>
+    Public Function DshModeEnabledForStartup() As Boolean
+        Try
+            Return DshSetting(Of Boolean)("DshMode", True)
+        Catch
+            Return True
+        End Try
+    End Function
+
+    ''' <summary>
     ''' 安全读取一个全局设置项。设置项不存在或读取异常时返回默认值，绝不抛出。
     ''' 用于在设置项尚未注册（例如旧版本配置文件）时仍能启动。
     ''' 重要（DEVNOTES §8.7）：不能用 Settings.Get 去"探测"设置项是否存在——

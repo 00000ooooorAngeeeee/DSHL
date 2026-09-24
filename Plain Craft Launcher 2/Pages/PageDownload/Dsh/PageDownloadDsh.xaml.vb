@@ -15,6 +15,28 @@ Public Class PageDownloadDsh
 
     Private Sub LoaderInit() Handles Me.Initialized
         PageLoaderInit(Load, PanLoad, PanContent, Nothing, DshVersionListLoader, AddressOf Load_OnFinish)
+        '把安装加载器接到安装进度环上：ShowProgress 依赖 State 才能显示百分比文本
+        LoadInstall.State = DshVersionInstallLoader
+        AddHandler DshVersionInstallLoader.OnStateChangedUi, AddressOf InstallStateChanged
+        AddHandler DshInstallStatusChanged, Sub(T) RunInUi(Sub()
+                                                              If PanInstall.Visibility = Visibility.Visible Then LabInstall.Text = T
+                                                          End Sub)
+    End Sub
+
+    ''' <summary>安装加载器状态变化 → 显示/隐藏安装进度浮层。</summary>
+    Private Sub InstallStateChanged(Loader As LoaderBase, NewState As LoadState, OldState As LoadState)
+        Select Case NewState
+            Case LoadState.Loading
+                LabInstall.Text = "正在安装 dsh，请稍候……"
+                HintInstall.Visibility = Visibility.Collapsed
+                PanInstall.Visibility = Visibility.Visible
+            Case LoadState.Failed
+                HintInstall.Text = "安装失败：" & If(Loader.Error?.GetDisplay(False), "未知错误")
+                HintInstall.Visibility = Visibility.Visible
+                '失败后保留浮层，让用户能看到错误；下次安装会重置
+            Case LoadState.Finished, LoadState.Canceled
+                PanInstall.Visibility = Visibility.Collapsed
+        End Select
     End Sub
 
     Private Sub Init() Handles Me.Loaded
@@ -22,7 +44,12 @@ Public Class PageDownloadDsh
         LabRoot.Text = "当前版本仓库：" & DshVersionRoot
     End Sub
 
-    ''' <summary>点击右上角刷新。</summary>
+    ''' <summary>
+    ''' 点击右上角刷新。
+    ''' 注意（实机踩坑）：这个按钮是 MyIconButton，它的 Click 委托是 **EventArgs**；
+    ''' 而 MyButton / MyListItem / MyLoading 的 Click 委托才是 MouseButtonEventArgs。
+    ''' 两者写反都会在页面构造时抛 XamlParseException，表现是整个页面打不开。
+    ''' </summary>
     Public Sub Refresh_Click(sender As Object, e As EventArgs)
         DshRefreshVersionList()
     End Sub
@@ -93,6 +120,14 @@ Public Class PageDownloadDsh
     End Sub
 
 #Region "版本条目操作"
+
+    ''' <summary>取消正在进行的安装。</summary>
+    Private Sub CancelInstall_Click(sender As Object, e As MouseButtonEventArgs)
+        If DshVersionInstallLoader.State = LoadState.Loading Then
+            DshVersionInstallLoader.Cancel()
+            LabInstall.Text = "正在取消安装……"
+        End If
+    End Sub
 
     ''' <summary>
     ''' 为版本条目构造右键菜单（PCL 标准写法：用 XML 生成，再从命名元素上挂事件）。

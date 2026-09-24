@@ -53,6 +53,26 @@
                     </StackPanel>
                 </Grid>
             </local:MyScrollViewer>
+            <!--
+                安装进度浮层。
+                为什么单独做一个：本页的 PageLoaderInit 管的是"版本列表"加载器，
+                而安装是另一个加载器（DshVersionInstallLoader），它的状态变化不会触发本页的
+                加载环切换。所以这里显式做一个浮层，由 InstallStateChanged 控制显隐。
+                进度环的百分比来自 MyLoading.ShowProgress + State = 安装加载器。
+            -->
+            <Grid x:Name="PanInstall" Visibility="Collapsed" Background="#99000000">
+                <local:MyCard HorizontalAlignment="Center" VerticalAlignment="Center" SnapsToDevicePixels="True" UseAnimation="False" Margin="40,50">
+                    <StackPanel Margin="8,4,8,0">
+                        <local:MyLoading x:Name="LoadInstall" Text="正在安装 dsh" ShowProgress="True" HasAnimation="True"
+                                         HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20,20,20,10" />
+                        <TextBlock x:Name="LabInstall" Text="正在安装 dsh，请稍候……" HorizontalAlignment="Center"
+                                   Margin="0,0,0,8" Opacity="0.7" FontSize="12" />
+                        <local:MyHint x:Name="HintInstall" Theme="Red" Visibility="Collapsed" Margin="0,4,0,8" />
+                        <local:MyButton x:Name="BtnCancelInstall" Text="取消安装" HorizontalAlignment="Center" Margin="0,0,0,14"
+                                        Click="CancelInstall_Click" />
+                    </StackPanel>
+                </local:MyCard>
+            </Grid>
         </Grid>
     </Grid>
 </local:MyPageRight>

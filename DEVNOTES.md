@@ -4,7 +4,7 @@
 > 记录**目标、约束、已核实的外部事实、避坑清单、进度**。
 > 改动前请先读 §7 的"工作流程"，并遵守 §8 的"注意事项"。
 
-最后更新：2026-09-24 ・ 启动器版本：`v0.3.6`
+最后更新：2026-09-24 ・ 启动器版本：`v0.3.7`
 
 ---
 
@@ -270,6 +270,65 @@ E:\DeepseekHarnessWP\
 20. **PCL 的 `Settings.Get` 会 `CTypeDynamic`**（见 §8.7），所以 DSH 侧另建了本地缓存 `DshSettingCache`，
     未注册的键会安全回落到默认值，不会抛异常。
 
+21. **批量正则改写要谨慎**：`Loader.Error` → `ErrorMessage` 这类“全局替换”很容易误伤（`Logger.Error` 就被伤过）。改完务必重新编译一遍。
+
+22. **`--dump-config` 的正常输出，退出码却是 1**：`dsh --profile web --dump-config` 打印完配置后退出码为 1，别把它当失败。`DshRunInfo` 因此只记 `Logger.Warn`，不抛异常。
+
+23. **profile 初始化命令**：不能写 `--from-default-profile web`（会报 `profile "web" is shipped and cannot be a custom profile target`），正确做法是 `dsh --profile web --dump-config`，它会在首次使用时从内置模板生成 `package.json` / `cordis.yml` / `cordis.patch.yml` / `pnpm-workspace.yaml`。
+
+24. **`LoaderBase.WaitForExit()` 会清空 `Input`**：它内部调用 `Start(Nothing, ...)`，而 `Start` 无条件覆盖 `Me.Input`。所以“先 `Start(值)` 再 `WaitForExit()`”拿不到值。DSH 侧用模块级变量 `DshPendingInstallVersion` + `DshRequestVersionInstall()` 绕开。
+
+25. **日期格式字符串里的单引号必须成对**：写错会抛 `FormatException: 无法为字符"'"找到匹配的引号字符`。正确写法是 `yyyy'-'MM'-'dd HH':'mm':'ss`。
+
+26. **dsh Web GUI 必须带 `?token=` 打开，否则 401**（本项目最重要的发现）。实测：不带 token 访问 `/` → **401**；`/?token=XXXX` 首次访问 → **303**（换发 cookie 并重定向到干净路径）；带 cookie 再访问 → **200**。源码印证：`browserAuth.authenticatedUrl()` 把**进程级** `launchToken` 作为唯一鉴权输入塞进 URL，而 `localWebUrl()` 返回的是不带 token 的干净地址。→ 抓 URL 的正则**必须连 query string 一起抓**。
+
+27. **`cordis.patch.yml` 必须是顶层 YAML 数组**：空文件或纯注释都会让 dsh **直接启动失败**（`Error: overlay ... must be a top-level YAML array of loader patch entries`）。空态必须写 `[]`，注释只能写在它**上面**。已验证 `- id: xxx` / `name: "@deepseek-ai/xxx"` / `disabled: true` 三段式能被 dsh 正确应用（dump 出来会变成 `# == @deepseek-ai/dsh-base, patched by .../cordis.patch.yml` 加 `disabled: true`）。
+
+28. **技能开关的“改名法”可用**：技能发现只扫描技能根**一层**，认定 `<root>\<name>\SKILL.md` 存在、且 `<name>` 匹配 `/^[a-z0-9]+(?:-[a-z0-9]+)*$/`。给目录加 `.disabled~` 前缀即彻底消失，去掉即恢复；dsh 有 chokidar 监视，运行中也立即生效。（`--dump-config` 里看不到技能目录，它是运行时服务，不能用 dump 验证。）
+
+29. **“端口通就复用”是错的**：dsh 的访问 token 是**进程级**的，启动器无法事后拼出；端口上还可能是启动器不知道、甚至**已启动失败**的 dsh 进程（它的 401 会误导我们复用）。正确做法：把带 token 的可用地址缓存到实例目录 `.pcl-web-url`，复用时先验证该地址仍可用（303/200），否则换空闲端口重新启动。
+
+30. **测试脚本写 `Setup.ini` 千万别带 BOM**：用 `Out-File` 或带 BOM 的 UTF8 会让**首行的键名被污染**，于是 `DshStopOnExit:True` 读出默认值 False，表现为“退出时不结束 dsh”。必须用 `[System.IO.File]::WriteAllText($p, $text, (New-Object System.Text.UTF8Encoding($false)))`。
+
+31. **UI 自动化验证 PCL 界面的可行手段**（用来完成“真点一次启动”的验证）：PCL 是自绘控件，UI Automation 里按钮只暴露为 `ControlType.Text`，且 `BoundingRectangle` 在 150% DPI 下**不可信**（y 值会远超窗口高度）。可靠替代：`PostMessage(hwnd, WM_CLOSE)` 触发正常关闭流程；`keybd_event` 发回车（PCL 有「回车＝点启动按钮」的快捷键）；**用日志文件判定动作是否发生**比读控件树稳；点击定位用「窗口相对坐标小网格扫描 ＋ 日志反馈」。
+
+32. **加载环必须放在 `PanLoad` 容器【内部】**：`PageLoaderInit` 只切换 **PanLoader / PanContent / PanAlways 的 Visibility**，**不会去动加载环本身**。写成 `PanLoad` 的兄弟节点，加载完成后它会一直挂着（表现为“一直在加载中”）。官方写法：`<local:MyCard x:Name="PanLoad"><local:MyLoading x:Name="Load" .../></local:MyCard>`。
+
+33. **`MyMsgBox` 最多三个按钮，要给用户留「取消」**：原来三个位置都被“安装／绑定／更新说明”占了，没选中整合包时中间还为空，用户**完全没有取消出口**。现在第三个按钮固定是「取消」，次要且破坏性的操作（卸载／重装／更新说明）移到条目**右键菜单**（PCL 标准做法：`GetObjectFromXML(<ContextMenu>...<local:MyMenuItem x:Name=.../>...</ContextMenu>)`，再按名字挂事件）。
+
+34. **用 `PrintWindow` 而不是 `CopyFromScreen` 抓窗口截图**：`CopyFromScreen` 会抓到覆盖在上面的其它窗口（我第一次就抓成了浏览器）。`PrintWindow(hwnd, hdc, 2)`（PW_RENDERFULLCONTENT）可直接把窗口画进 bitmap，**不需要窗口在最前**；配合 UIA 枚举元素文本，能确定地复核“按钮文案／是否存在”。
+
+35. **`FormMain.PageChange` 会拿顶级页枚举值当 `PanTitleSelect.Children` 的下标**：即 `CType(PanTitleSelect.Children(Stack), MyRadioButton)` —— 顶部导航只有 **5** 个 radio（Tag 0~4），所以**任何大于 4 的枚举值都不能作为顶级页面直接 PageChange**，否则抛 `ArgumentOutOfRangeException: index`。已有的 5~9（版本选择／任务管理／版本设置／资源详情／帮助详情）都是“副页面”，进入时不碰这句。→ 新增页面要么做副页面，要么挂在已有主页面下当子页面。「整合包管理」最初被做成顶级页（`DshManager = 10`），点「版本设置」直接崩，现改为 `PageChange(PageType.Setup, PageSubType.SetupManager)`。
+
+36. **子页面必须在左列表里占住对应下标**：`PageChange` 里 `CType(FrmSetupLeft.PanItem.Children(SubType), MyListItem)` 是**按下标取控件**，所以 `PageSubType` 的数值必须与左栏 StackPanel 的子元素下标一一对应。「整合包管理」不想出现在设置左栏，就放一个 `Visibility="Collapsed"` 的占位 `MyListItem`（Tag=5）占位。另外这次崩溃现场说明：若之前停在「DSH 运行环境」（下标 4），`PageChange` 会把 SubType 缺省推导成 4，**越界与否取决于当前所在子页面**，不好复现。
+
+37. **`Click` 处理函数签名写错不会编译报错，而是页面构造时抛 `XamlParseException`**：`无法从文本 "Xxx_Click" 创建 "Click"` → `无法绑定到目标方法，因其签名…与委托类型…不兼容`。表现是整个页面打不开并弹“程序出现未知错误”。**每个控件具体要什么签名见第 42 条的完整对照表**，不要凭“规律”猜。
+
+38. **`MyLoading` 的进度必须自己接上**：`PageLoaderInit` **不会**把加载器赋给加载环（它只管显隐与动画）。要显示“xxx - 42%”，必须自己写 `LoadXxx.State = 某个Loader`（官方页面就是一行行这么赋的），并且该 Loader 的 `Progress`（0~1）要真的被更新，否则永远 0%。另外 `MyLoading` 的进度表现是“标题文字 ＋ 竖条矩形”，**没有横向进度条**（想要就得自己画）。
+
+39. **同一页面上有多个加载器时，页面级 `PageLoaderState` 只管其中一个**：下载页的“版本列表”和“安装”是两个独立 Loader，安装时页面级加载环不会自己切换。所以安装进度用了专门的浮层（`PanInstall`），由安装加载器的 `OnStateChangedUi` 手动控制显隐。
+
+40. **`VersionBranchMain = "OpenSource"` 的开源版本说明弹窗**在 `FormMain` 初始化线程里弹出，内容是 Minecraft 相关（CurseForge／正版登录／主题／百宝箱），对 DSH 启动器毫无意义，已在 DSH 模式下跳过。启动早期不能调 `PageLaunchLeft.DshModeEnabled()`（Protected），用 `DshModeEnabledForStartup()`（放在 ModDshBase，任何异常都当“启用”）。
+
+41. **取消子进程要连整棵进程树**：`npm.cmd` 只是 `cmd.exe` 的外壳，真正干活的是 `node.exe` 子进程。只 `Kill()` 外壳会留下还在写文件的 npm，下次安装就撞 `ENOTEMPTY: directory not empty`，要用 `taskkill /PID x /T /F`。同理，**同版本安装必须加互斥**：两个 npm 同时写同一暂存目录会互相删文件（实测报 `ENOTEMPTY .../domino/test`）；每次安装还应使用**独一无二的暂存目录**并清理遗留。
+
+42. **PCL 控件 `Click` 委托完整对照表（踩了 3 次才记全，务必对照）**：
+
+    | 控件 | Click 委托 | 处理函数写法 |
+    |---|---|---|
+    | `MyButton` | `MouseButtonEventArgs` | `(sender As Object, e As MouseButtonEventArgs)` |
+    | `MyIconButton` | **`EventArgs`** | `(sender As Object, e As EventArgs)` |
+    | `MyListItem` | `MouseButtonEventArgs` | `(sender As Object, e As MouseButtonEventArgs)` |
+    | `MyLoading` | `MouseButtonEventArgs` | `(sender As Object, e As MouseButtonEventArgs)` |
+    | `MyListItem.Changed` | `RouteEventArgs` | `(sender As Object, e As RouteEventArgs)` |
+    | `MyComboBox` | 标准 `SelectionChangedEventArgs` | `(sender As Object, e As SelectionChangedEventArgs)` |
+
+    查证方法：直接看 `Controls\<控件>.xaml.vb` 里的 `Public Event Click(...)`。
+    **注意**：XAML 里没被引用的同名方法（例如 `PageDshManager.Refresh_Click`，只是 `IRefreshable` 的配套）签名不匹配也无妨，别盲目“统一签名”。
+    教训：v0.3.6 我以为找到了“一律写 MouseButtonEventArgs”的规律，把本来正确的 `MyIconButton` 处理函数改坏了，v0.3.7 才靠实机冒烟测出来。**“发现的规律”必须再实测一次才算数。**
+
+43. **DEVNOTES 自身也要及时落盘**：本轮曾出现“会话里记了 20 多条避坑、文件里却只写到第 20 条”的脱节，靠核对行号才发现。**每轮结束时数一遍条目数**，确认新条目真的写进文件了。
+
 ---
 
 ## 8b. 本地构建环境搭建记录（v0.3.0 完成）
@@ -325,6 +384,7 @@ E:\DeepseekHarnessWP\tools\dotnet\dotnet.exe msbuild "Plain Craft Launcher 2\Pla
 | v0.3.4 | 2026-09-24 | **在真实 GUI 里端到端验证通过**：回车点启动 → dsh 起来 → 抓到带 token 地址 → 浏览器打开 → HTTP 200 + `<title>DeepSeek Harness</title>`；并修复端口复用策略、增加 URL 缓存 | ✅ 已完成 |
 | v0.3.5 | 2026-09-24 | 修用户反馈的两个 UI 问题：「加载中」不消失、版本对话框没有取消；次要操作移入右键菜单 | ✅ 已完成 |
 | v0.3.6 | 2026-09-24 | 修用户反馈：「设置→DSH 运行环境」与「版本设置」两处页面打不开（handler 签名 / 顶级页下标越界）；安装加互斥与进程树清理 | ✅ 已完成 |
+| v0.3.7 | 2026-09-24 | 安装过程显示真实进度（百分比 + 阶段文案 + 可取消）；去掉 DSH 模式下无意义的「开源版本说明」弹窗；修第 4 处 Click 签名坑 | ✅ 已完成 |
 | v0.4.0 | — | 术语清理：启动页/关于页的 Minecraft 残留文案、账号与皮肤入口隐藏 | ⏳ 待做 |
 | v0.5.0 | — | 术语清理：启动页/关于页的 Minecraft 残留文案、账号与皮肤入口隐藏、联机页处理 | ☐ |
 | v0.6.0 | — | 引导完善：Node 下载进度提示、失败重试、镜像源切换；首次启动引导的视觉打磨 | ☐ |
@@ -348,16 +408,16 @@ E:\DeepseekHarnessWP\tools\dotnet\dotnet.exe msbuild "Plain Craft Launcher 2\Pla
 
 ### 已知未完成 / 待验证（下一次接手先看这里）
 
-1. **没有实机运行验证过**。v0.3.0 只做到「编译通过 + 静态审查」，没有真正启动过整合包。
+1. ~~没有实机运行验证过~~ → **已在 v0.3.4 端到端验证通过**（真实 GUI 点启动 → dsh 起来 → 抓到带 token 地址 → 浏览器打开 → HTTP 200 且 title 为 DeepSeek Harness）。
    第一次运行请重点检查：
    - `DshEnsureFirstRun` 的弹窗顺序是否会卡住 UI（`RunInUiWait` + `WaitForExit` 的组合）
    - `DshInstanceListLoader.WaitForExit()` 在 UI 线程被调用会不会死锁
      （`DshEnsureFirstRun` 在后台线程调用，应该没问题；`PageDshManager` 里在 UI 线程调用过，需要实测）
    - `ModDshLaunch` 的 stdout 时序：dsh 是否真的把 URL 打到 stdout
-2. **技能开关的实现依赖 dsh 的扫描规则**（只认一层目录 + `SKILL.md`），已按源码核实，但没实测过。
-3. **插件开关写 `cordis.patch.yml` 的格式**是按 dsh 文档推断的（`- name: X` / `disabled: true`），
+2. ~~技能开关没实测~~ → **已按源码核实并做等价验证**（见第 28 条），加 `.disabled~` 前缀即不再被发现。
+3. ~~插件开关格式是推断的~~ → **已用 dsh 的 `--dump-config` 实证生效**（见第 27 条）。原文（`- name: X` / `disabled: true`），
    需要实测确认；`DshReadDisabledPlugins` 的解析也是按这个格式写的。
 4. **DshManager 页面的布局没有设计稿**，是直出实现的，视觉上还需要打磨。
-5. `ModDshInstall` 的 npm 安装没有接 PCL 的下载任务栏（`LoaderTaskbar`），进度只在日志里。
+5. `ModDshInstall` 的 npm 安装没有接 PCL 的下载任务栏（`LoaderTaskbar`）；v0.3.7 起已改为在下载页显示进度浮层（百分比 ＋ 阶段文案 ＋ 取消），但仍未接入任务栏。**进度观感需实机装一次确认。**
 6. 启动页仍然显示 Minecraft 的账号/皮肤区域（已设为 `IsHitTestVisible = False` 并隐藏部分元素），
    但没有彻底移除，术语清理留待 v0.5.0。

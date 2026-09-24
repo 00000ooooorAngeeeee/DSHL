@@ -174,6 +174,25 @@ Public Module ModDshInstall
     Private ReadOnly DshInstallSlot As New Object
     Private DshInstallRunning As Boolean = False
 
+    ''' <summary>最近一次安装的状态文案（供界面显示）。</summary>
+    Public ReadOnly Property DshInstallStatusText As String
+        Get
+            Return _DshInstallStatusText
+        End Get
+    End Property
+
+    ''' <summary>安装状态文案变化事件（在调用线程触发，订阅方自行切回 UI 线程）。</summary>
+    Public Event DshInstallStatusChanged(Text As String)
+
+    ''' <summary>汇报一句安装进度文案。</summary>
+    Private Sub DshReportStatus(Text As String, Optional NewProgress As Double = -1)
+        If String.IsNullOrWhiteSpace(Text) Then Return
+        _DshInstallStatusText = Text
+        RaiseEvent DshInstallStatusChanged(Text)
+        If NewProgress >= 0 Then DshLog(Text)
+    End Sub
+    Private _DshInstallStatusText As String = ""
+
     Private Sub DshInstallVersionCore(Loader As LoaderBase, Version As String)
         Dim NodeExe As String = DshNodeExe
         If NodeExe Is Nothing Then Throw New Exception("尚未配置 Node.js 运行环境，请先在设置中安装或指定 node.exe")
@@ -201,7 +220,15 @@ Public Module ModDshInstall
         DshLog($"正在安装 dsh {Version}（源：{Registry}）")
         Dim Args As String = $"install --prefix ""{PathUtils.RemoveSlashSuffix(Stage)}"" --no-audit --no-fund --loglevel=error --registry={Registry} ""{DshPackageName}@{Version}"""
 
-        DshRunNpm(Loader, NpmCmd, Args, Stage)
+        Loader.Progress = 0.1
+        DshReportStatus("正在下载并安装 dsh（约 500 个包，通常 1~2 分钟）……", 0.1)
+        DshRunNpm(Loader, NpmCmd, Args, Stage,
+                  Sub(P, T)
+                      If T <> "" Then DshReportStatus(T, -1)
+                      If P >= 0 Then Loader.Progress = P
+                  End Sub,
+                  ProgressFrom:=0.12, ProgressTo:=0.88)
+        Loader.Progress = 0.9
 
         '3. 校验
         Dim InstalledBin As String = Stage & "node_modules\" & DshPackageName.Replace("/", "\") & "\lib\bin.js"
@@ -209,6 +236,8 @@ Public Module ModDshInstall
             Throw New Exception($"npm 安装结束但未找到 dsh 入口文件：{InstalledBin}。请检查网络或换用国内源后重试")
         End If
         If Loader.State = LoadState.Canceled Then Return
+        DshReportStatus("正在部署到版本仓库……", 0.93)
+        Loader.Progress = 0.93
 
         '4. 搬到版本仓库
         DshLog($"正在部署到版本仓库：{Target}")
@@ -220,6 +249,8 @@ Public Module ModDshInstall
             End Try
         End If
         DirectoryUtils.Create(Target)
+        DshReportStatus("正在部署到版本仓库……", 0.94)
+        Loader.Progress = 0.94
         DirectoryUtils.Move(Stage & "node_modules", PathUtils.RemoveSlashSuffix(Target & "node_modules"))
 
         '5. 写标记与元数据
@@ -244,13 +275,18 @@ Public Module ModDshInstall
             DirectoryUtils.Delete(Stage)
         Catch
         End Try
+        DshReportStatus("安装完成", 1)
+        Loader.Progress = 1
         DshLog($"dsh {RealVersion} 安装完成")
     End Sub
 
     ''' <summary>
     ''' 执行一次 npm 命令，实时把输出喂给 Loader 的日志与进度。
+    ''' OnStatus 用于把"当前阶段文案"回报给界面（可空）。
     ''' </summary>
-    Private Sub DshRunNpm(Loader As LoaderBase, NpmCmd As String, Arguments As String, WorkingDirectory As String)
+    Private Sub DshRunNpm(Loader As LoaderBase, NpmCmd As String, Arguments As String, WorkingDirectory As String,
+                          Optional OnStatus As Action(Of Double, String) = Nothing,
+                          Optional ProgressFrom As Double = 0.15, Optional ProgressTo As Double = 0.9)
         Dim Info As New ProcessStartInfo With {
             .FileName = "cmd.exe",
             .Arguments = $"/c """"{NpmCmd}"" {Arguments}""",
@@ -264,6 +300,13 @@ Public Module ModDshInstall
         Info.WorkingDirectory = WorkingDirectory
         Dim Proc As Process = StartProcess(Info)
         Dim Buffer As New StringBuilder()
+        Dim StartTick As Long = GetTimeMs()
+        Dim Report As Action =
+            Sub()
+                If OnStatus Is Nothing Then Return
+                If Loader.State = LoadState.Canceled Then Return
+                OnStatus(DshEstimateProgress(StartTick, ProgressFrom, ProgressTo), "")
+            End Sub
         Dim Handler As DataReceivedEventHandler =
             Sub(Sender As Object, E As DataReceivedEventArgs)
                 If E.Data Is Nothing Then Return
@@ -273,13 +316,18 @@ Public Module ModDshInstall
                 'npm 用 "reify" 之类的字样输出进度，这里只把有意义的行写进日志
                 Dim Text As String = E.Data.Trim()
                 If Text.Length > 0 AndAlso Text.Length < 200 AndAlso Not Text.Contains("⸨") Then DshLog(Text)
+                '根据输出内容给出更贴近实际的阶段文案
+                If OnStatus IsNot Nothing Then
+                    Dim Phase As String = DshNpmPhaseText(Text)
+                    If Phase <> "" Then OnStatus(-1, Phase)
+                End If
             End Sub
         AddHandler Proc.OutputDataReceived, Handler
         AddHandler Proc.ErrorDataReceived, Handler
         Proc.BeginOutputReadLine()
         Proc.BeginErrorReadLine()
 
-        '等待，同时响应取消
+        '等待，同时响应取消、并按时间估计进度
         While Not Proc.HasExited
             If Loader.State = LoadState.Canceled Then
                 '必须连整棵进程树一起杀：npm.cmd 只是 cmd.exe 的外壳，
@@ -288,7 +336,8 @@ Public Module ModDshInstall
                 DshKillProcessTree(Proc)
                 Throw New Exception("安装已被用户取消")
             End If
-            Thread.Sleep(120)
+            Report()
+            Thread.Sleep(200)
         End While
         Proc.WaitForExit()
 
@@ -301,6 +350,30 @@ Public Module ModDshInstall
             Throw New Exception($"npm 安装失败（退出码 {Proc.ExitCode}）：{vbCrLf}{Tail}")
         End If
     End Sub
+
+    ''' <summary>
+    ''' 按耗时估算安装进度（0~1）。npm 不提供机器可读的百分比，所以用饱和曲线：
+    ''' 开局涨得快、后面越来越慢，永远不会因为估得不准而卡在 100% 不动。
+    ''' </summary>
+    Private Function DshEstimateProgress(StartTick As Long, From As Double, [To] As Double) As Double
+        Dim Seconds As Double = Math.Max(0, (GetTimeMs() - StartTick) / 1000.0)
+        Dim Ratio As Double = Math.Log(1 + Seconds / 12.0) / Math.Log(1 + 150.0 / 12.0)
+        Return From + ([To] - From) * Math.Min(1, Ratio)
+    End Function
+
+    ''' <summary>把 npm 的一行输出翻译成用户看得懂的阶段文案（没有匹配则返回空）。</summary>
+    Private Function DshNpmPhaseText(Line As String) As String
+        If Line = "" Then Return ""
+        Dim L As String = Line.ToLowerInvariant()
+        If L.Contains("cmakelists") OrElse L.Contains("rebuilding from source") OrElse L.Contains("prebuild-install") Then
+            Return "正在编译原生模块（这一步较慢，可能需要几分钟）……"
+        End If
+        If L.Contains("added ") OrElse L.Contains("packages in ") Then Return "正在收尾……"
+        If L.Contains("reify") Then Return "正在解压并写入文件……"
+        If L.Contains("http fetch") OrElse L.Contains("cache hit") OrElse L.Contains("tarball") Then Return "正在下载安装包……"
+        If L.Contains("npm warn deprecated") Then Return "正在处理依赖……"
+        Return ""
+    End Function
 
     ''' <summary>
     ''' 结束整棵进程树（先 taskkill /T /F，失败再退回 Process.Kill）。

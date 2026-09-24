@@ -5,6 +5,58 @@
 
 ---
 
+## [v0.3.7] — 2026-09-24
+
+### 新增：安装 dsh 时显示真实进度（用户反馈"下载时没有下载进度"）
+原来的问题有两层：
+1. **进度环根本没接上加载器**。`PageLoaderInit` 只负责 PanLoader / PanContent / PanAlways 的显隐与动画，
+   **它不会设置 `MyLoading.State`**——而 `MyLoading.ShowProgress` 显示百分比的前提正是
+   `State` 指向一个 Loader（官方页面都是一行行手写 `LoadOptiFine.State = DlOptiFineListLoader` 的）。
+2. **安装过程压根没汇报进度**。`Loader.Progress` 从头到尾没被更新过，所以即使接上了也永远是 0%。
+
+现在：
+- 安装加载器接到进度环上（`LoadInstall.State = DshVersionInstallLoader`），显示百分比。
+- 安装过程按阶段真实汇报：
+  | 阶段 | 进度 |
+  |---|---|
+  | 开始准备 | 10% |
+  | npm 下载安装 500+ 个包 | 12% → 88%（按耗时的饱和曲线推进，不会假满） |
+  | 校验入口文件 | 90% |
+  | 部署到版本仓库 | 94% |
+  | 完成 | 100% |
+- 解析 npm 输出给出**阶段文案**，例如
+  「正在下载安装包……」「正在解压并写入文件……」「正在编译原生模块（这一步较慢，可能需要几分钟）……」
+  「正在收尾……」（koffi 那类原生模块要本地编译，不给提示时用户会以为卡死了）。
+- 新增**安装进度浮层**（半透明遮罩 + 进度环 + 阶段文案 + 取消按钮）。
+  为什么不用页面级的加载环切换：本页有两个加载器（版本列表 / 安装），
+  页面级 `PageLoaderState` 只管版本列表那个，安装时不会自动切换。
+- 新增**取消安装**按钮。取消时走 `taskkill /PID x /T /F` 结束整棵进程树（见 v0.3.6）。
+
+### 修复：去掉首次启动的「开源版本说明」弹窗（用户要求）
+`FormMain` 初始化线程里，当 `VersionBranchMain = "OpenSource"` 时会弹一个"该版本中无法使用以下特性"的框，
+列的是 CurseForge API / 正版登录 / 更新通知 / 主题切换 / 百宝箱——**全是 Minecraft 相关，对 DSH 启动器毫无意义**。
+已在 DSH 模式下跳过（新增 `DshModeEnabledForStartup()`，因为启动早期拿不到 `PageLaunchLeft` 的 Protected 方法，
+且此时界面尚未建好，必须容错）。
+
+### 修复：第 4 处 Click 签名坑
+`PageDownloadDsh` 的 `Refresh_Click` 同样写成了 `EventArgs` —— 右上角"重新获取版本列表"按钮一点就崩。
+**规律：凡是 XAML 里 `Click=` 绑定的处理函数，参数一律 `(sender As Object, e As MouseButtonEventArgs)`。**
+（`PageDshManager.Refresh_Click` 虽然签名也不对，但 XAML 里没引用，只是 `IRefreshable` 的配套方法，无隐患。）
+
+### 变更
+- `ModBase.vb`：版本号 `0.3.6` → `0.3.7`。
+- `ModDshBase.vb`：新增 `DshModeEnabledForStartup()`。
+- `ModDshInstall.vb`：`DshRunNpm` 支持进度回调与阶段识别；新增 `DshEstimateProgress`、`DshNpmPhaseText`、
+  `DshInstallStatusChanged` 事件；各阶段设置 `Loader.Progress`。
+- `PageDownloadDsh`：进度环接线、安装浮层、取消按钮、修正 `Refresh_Click` 签名。
+- `DEVNOTES.md`：新增 4 条（#38 MyLoading 进度要自己接、#39 多加载器需手动切 UI、
+  #40 开源版本说明弹窗、#41 Click 签名规律）。
+
+### 待实机确认
+安装过程的进度百分比与阶段文案需要在真机上装一次才能看到最终观感（本轮只做了静态审计与编译验证）。
+
+---
+
 ## [v0.3.6] — 2026-09-24
 
 **修复用户反馈的 3 个真 bug**（其中 2 个会导致页面完全打不开）。

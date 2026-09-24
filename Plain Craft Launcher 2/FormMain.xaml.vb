@@ -428,7 +428,11 @@ Public Class FormMain
             '上报
             Telemetry("启动")
             '开源版本提示
-            If VersionBranchMain = "OpenSource" Then
+            'DSH 魔改：DSH 模式下不显示。
+            '（这个弹窗列的是"CurseForge API / 正版登录 / 更新通知 / 主题切换 / 百宝箱"这些
+            '  Minecraft 相关特性在开源版里不可用——对 DSH 启动器来说全是无关内容，
+            '  首次启动时平白多一个弹窗，用户反馈要去掉。）
+            If VersionBranchMain = "OpenSource" AndAlso Not DshModeEnabledForStartup() Then
                 MyMsgBox($"该版本中无法使用以下特性：{vbCrLf}- CurseForge API 调用：需要自行申请 API Key，然后添加到 ModSecret.vb 的开头{vbCrLf}- 正版登录：需要自行向微软申请 Client ID，然后添加到 ModSecret.vb 的开头{vbCrLf}- 更新与联网通知：避免滥用隐患{vbCrLf}- 主题切换：这是需要赞助解锁的纪念性质的功能，别让赞助者太伤心啦……{vbCrLf}- 百宝箱：开发早期往里面塞了些开发工具，整理起来太麻烦了……", "开源版本说明")
             End If
         End Sub, "初始化", ThreadPriority.Lowest)
