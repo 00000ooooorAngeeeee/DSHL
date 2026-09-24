@@ -5,7 +5,43 @@
 
 ---
 
-## [v0.5.1] — 2026-09-24
+## [v0.5.2] — 2026-09-24
+
+### 修复：第二次从启动页点「整合包管理」会显示「个性化」
+上一版我用 `IsPageSwitched` 做守卫，**但诊断日志证明这个条件在读的时候还是 `False`**：
+```
+切换主要页面：Setup, SetupManager
+设置页 Loaded（DSH）：IsPageSwitched=False, PageID=SetupManager, Manager=True, UI=False
+设置页 Loaded（DSH）：无人指定子页面，默认选中「个性化」   ← 覆盖发生在这里
+```
+**时序真相**：`PageChange` 会先设置 `PageID = SetupManager`、`ItemManager.Checked = True`，
+然后在 `PageChangeRun` 里把控件挂到可视树 —— 此时触发 `Loaded`，
+**而 `IsPageSwitched = True` 是在这之后才执行的**。所以 `Loaded` 里读到 `IsPageSwitched = False`，
+守卫失效，于是执行了"默认选中个性化"把刚设好的管理页覆盖掉。
+
+**修法**：守卫改为直接看**已经是正确目标值**的那两个状态：
+```vb
+If IsPageSwitched OrElse PageID = PageSubType.SetupManager OrElse ItemManager.Checked Then Return
+```
+另外在 `FormMain.PageChange` 的 `PageChangeActual` **之后**再加一次纠正（`SetChecked` 幂等，重复无害），
+用来对抗"某条我没枚举到的路径里 Loaded 晚于一切"这种情况。
+
+**实机确认**（加了临时诊断日志，逐次访问都验证）：
+- 第 1 次：`IsPageSwitched=False, PageID=SetupManager, Manager=True`，**不再出现"默认选中个性化"** ✔
+- 第 2 次：同上 ✔
+
+### 教训（DEVNOTES #73）
+**用"某个标志位"做时序守卫时，必须确认这个标志位在读取点已经被赋值。**
+`IsPageSwitched` 名字看起来正合适，但它的赋值发生在 `Loaded` 触发之后 —— 名字对不代表时序对。
+更稳的做法是判断**目标状态本身**（`PageID` / `ItemManager.Checked`），而不是判断"有没有人操作过"。
+
+### 变更
+- `ModBase.vb`：版本号 `0.5.1` → `0.5.2`。
+- `PageSetupLeft.xaml.vb`：守卫条件改用 `PageID` / `ItemManager.Checked`；保留诊断日志。
+- `FormMain.xaml.vb`：`PageChangeActual` 之后补一次选中项纠正。
+- `DEVNOTES.md`：新增 #73（时序守卫要用目标状态而不是标志位）。
+
+---
 
 ### 修复：启动页点「整合包管理」跳到了「个性化」页
 从启动页点「整合包管理」会走 `FormMain.PageChange(Setup, SetupManager)`，它已经

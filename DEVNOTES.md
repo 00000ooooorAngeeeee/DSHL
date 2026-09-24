@@ -510,6 +510,23 @@ E:\DeepseekHarnessWP\
     （每次构造都要读整合包列表、插件、技能等）。删掉 FormMain 里那句后导航耗时从 ~1s 降到 ~0.53s。
     **教训：同一个对象的"按需创建"只留一处，别在调用链的两端各写一遍。**
 
+73. **用"某个标志位"做时序守卫时，必须确认这个标志位在读取点已经被赋值。**
+    案例：`PageSetupLeft.Loaded` 里要判断"是否已经有人明确指定了子页面"，
+    我用 `IsPageSwitched`（名字看起来正合适）做守卫，但诊断日志显示读到的仍是 False：
+        切换主要页面：Setup, SetupManager
+        设置页 Loaded（DSH）：IsPageSwitched=False, PageID=SetupManager, Manager=True, UI=False
+        设置页 Loaded（DSH）：无人指定子页面，默认选中「个性化」   ← 覆盖发生在这里
+    时序真相：`PageChange` 先设 `PageID=SetupManager`、`ItemManager.Checked=True`，
+    再在 `PageChangeRun` 里把控件挂到可视树 —— 挂载时触发 `Loaded`，
+    **而 `IsPageSwitched = True` 是在挂载之后才执行的**。
+    → 更稳的做法是判断**目标状态本身**（`PageID` / `ItemManager.Checked`），
+      而不是判断"有没有人操作过"。**名字对不代表时序对。**
+
+74. **给"猜不出来的时序 bug"加一次性诊断日志，比反复读代码快得多。**
+    这次我复现不出用户的现象、读代码也觉得自洽，于是直接在两处打印
+    `IsPageSwitched / PageID / ItemManager.Checked / ItemUI.Checked`，
+    一次运行就把真相打在日志里了。**日志要打印"判断条件用到的所有量"，而不只是结论。**
+
 ---
 
 ## 8b. 本地构建环境搭建记录（v0.3.0 完成）

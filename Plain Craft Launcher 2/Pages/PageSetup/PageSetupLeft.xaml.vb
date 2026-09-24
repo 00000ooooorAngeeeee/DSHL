@@ -11,13 +11,24 @@ Public Class PageSetupLeft
         '   于是左栏会漏出「启动 / 个性化 / 其他」——用户实测到的那条诡异流程就是这个原因。
         If PageLaunchLeft.DshModeEnabled() Then
             PageSetupUI.DshApplySetupLeftVisibility()
-            '★ 关键：如果进入设置页时已经明确要显示某个子页面（例如从启动页点「整合包管理」
-            '   → FormMain.PageChange(Setup, SetupManager)，它已经 SetChecked 过 ItemManager），
-            '   就**不要再改选中项**，否则会把管理页覆盖成「个性化」（用户实测到的 bug）。
-            '   IsPageSwitched 是本类里已有的标记，PageChange 会把它置 True。
-            If IsPageSwitched Then Return
+            '★ 关键：如果已经明确要显示某个子页面，就**不要再改选中项**，
+            '否则会把「整合包管理」覆盖成「个性化」（用户实测的 bug，诊断日志确认过）。
+            '
+            '为什么不能只判断 IsPageSwitched（实机诊断日志）：
+            '   PageChange 会先设置 PageID=SetupManager、ItemManager.Checked=True，
+            '   然后在 PageChangeRun 里把控件挂到可视树 —— 此时触发 Loaded，
+            '   **而 IsPageSwitched = True 是在这之后才执行的**，所以 Loaded 里读到的
+            '   IsPageSwitched 仍是 False，守卫失效、于是默认选中了「个性化」。
+            '   日志原样：
+            '     切换主要页面：Setup, SetupManager
+            '     设置页 Loaded（DSH）：IsPageSwitched=False, PageID=SetupManager, Manager=True, UI=False
+            '     设置页 Loaded（DSH）：无人指定子页面，默认选中「个性化」   ← 覆盖发生在这里
+            '→ 改为直接看 PageID 与 ItemManager.Checked：它们在这时已经是正确的目标值。
+            Logger.Info($"设置页 Loaded（DSH）：IsPageSwitched={IsPageSwitched}, PageID={PageID}, Manager={ItemManager.Checked}, UI={ItemUI.Checked}")
+            If IsPageSwitched OrElse PageID = FormMain.PageSubType.SetupManager OrElse ItemManager.Checked Then Return
             '默认选中「个性化」（用户截图里的效果）
             If Not Settings.Get(Of Boolean)("UiHiddenSetupUi") Then
+                Logger.Info("设置页 Loaded（DSH）：无人指定子页面，默认选中「个性化」")
                 ItemUI.SetChecked(True, False, False)
             Else
                 ItemDsh.SetChecked(True, False, False)
@@ -135,6 +146,7 @@ Public Class PageSetupLeft
         If PageID = ID Then Return
         AniControlEnabled += 1
         IsPageSwitched = True
+        Logger.Info($"设置页 PageChange：{ID}（IsPageSwitched 置 True）")
         Try
 
             Select Case ID

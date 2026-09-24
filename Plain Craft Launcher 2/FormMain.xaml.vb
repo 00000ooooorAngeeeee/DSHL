@@ -1425,6 +1425,18 @@ Public Class FormMain
                     CType(FrmOtherLeft.PanItem.Children(SubType), MyListItem).SetChecked(True, True, Stack = PageCurrent)
             End Select
             PageChangeActual(Stack, SubType)
+            'DSH 魔改：进设置页时，若目标子页面是「整合包管理」，在切换动画发起之后**再纠正一次**选中项。
+            '原因（用户实测：第二次从启动页点「整合包管理」会显示「个性化」）：
+            'PageSetupLeft.Loaded 里有一段"默认选中个性化"的初始化，而 Loaded 的触发时机
+            '与 PageChange 的先后关系在不同进入顺序下并不固定；IsPageSwitched 守卫能覆盖大多数情况，
+            '但为稳妥起见，这里在页面切换已发起后再设一次（SetChecked 是幂等的，重复调用无害）。
+            If Stack.Page = PageType.Setup AndAlso SubType = PageSubType.SetupManager AndAlso FrmSetupLeft IsNot Nothing Then
+                Try
+                    CType(FrmSetupLeft.PanItem.Children(PageSubType.SetupManager), MyListItem).SetChecked(True, True, False)
+                Catch ex As Exception
+                    Logger.Warn(ex, "纠正「整合包管理」选中项失败")
+                End Try
+            End If
         Else
             '切换到次页面
             Select Case Stack.Page
