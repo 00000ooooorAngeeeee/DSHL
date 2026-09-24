@@ -474,6 +474,25 @@ E:\DeepseekHarnessWP\
     "不同进入路径下同一个方法是否执行"这个差异，比我反复截图猜快得多。
     **遇到"时好时坏"的 bug，先请用户描述复现路径。**
 
+67. **设置页左栏"最终形态"是：联机 / 个性化 / DSH 运行环境 / 整合包管理**（用户确认）。
+    对应的固定开关：`UiHiddenSetupLaunch = True`、`UiHiddenSetupSystem = True`、
+    `UiHiddenSetupUi = False`（个性化**保留**——用户要用主题/背景等启动器设置）、
+    `UiHiddenSetupLink = False`、`UiHiddenPageOther = True`。
+    注意两点：
+      · `UiHiddenSetupUi` 之前被我误设为 True，导致左栏只剩一项；现在改回 False。
+      · 左栏条数不能再少：PCL 有 `AvaliableCount < 2` 就整块收起左栏的规则，
+        而「联机」被 PCL 硬编码成 Collapsed、不计入，所以实际可见项是 个性化 / DSH / 整合包管理 三项。
+
+68. **「整合包管理」条目从"隐藏占位"升级为"可见条目"**：
+    它原本只为占住下标 5 而存在（`Visibility="Collapsed"`），入口只有启动页那个按钮，太深。
+    现在 `PageCheck` 的 `Handles` 里加上了 `ItemManager.Check`，并在 DSH 模式下设为可见，
+    于是设置页左栏可以直接进整合包管理。**加入 Handles 是必须的**，否则点它不会切页。
+
+69. **用户说"应该是 B 方案"时，指的是选项本身而不是措辞**：
+    我在上一条回复里给了 A/B 两个选项，用户回图并说"应该是B方案，如图是我预期的效果"。
+    → 遇到这种"给两个方案让用户选"的情况，用户回一个字母 + 截图，就以**截图为准**去核对，
+      不要只按字母推断（截图能确认我理解对了没有，字母不能）。
+
 ---
 
 ## 8b. 本地构建环境搭建记录（v0.3.0 完成）

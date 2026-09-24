@@ -45,11 +45,12 @@
             </local:MyListItem.Buttons>
         </local:MyListItem>
         <!--
-            整合包管理：不在设置左栏里显示（保持 Collapsed），
-            它的唯一作用是占住下标 5，好让 PageChange 里的
-            CType(FrmSetupLeft.PanItem.Children(SubType), MyListItem) 不会越界。
-            进入方式：启动页的「版本设置」按钮。
+            整合包管理：占住下标 5（FormMain.PageChange 与 PageGet/PageChange 都按 Children 下标取控件，
+            删掉元素会让 SetupDsh=4 / SetupManager=5 全部错位）。
+            DSH 模式下由 PageSetupUI.DshApplySetupLeftVisibility() 把它设为可见，
+            这样设置页左栏也能直接进整合包管理（原来只能从启动页的按钮进，入口太深）。
         -->
-        <local:MyListItem x:Name="ItemManager" Visibility="Collapsed" IsScaleAnimationEnabled="False" Tag="5" MinPaddingRight="35" Height="36" VerticalAlignment="Top" Title="整合包管理" Type="RadioBox" />
+        <local:MyListItem x:Name="ItemManager" Visibility="Collapsed" IsScaleAnimationEnabled="False" Tag="5" MinPaddingRight="35" Height="36" VerticalAlignment="Top" Title="整合包管理" Type="RadioBox" LogoScale="1.05"
+            Logo="M512 817c-48.601 0-88-39.399-88-88s39.399-88 88-88 88 39.399 88 88-39.399 88-88 88zM237.671 565.74C308.335 474.58 397.369 429 504.774 429c118.433 0 214.225 55.421 287.377 166.264l-53.407 30.369c-13.84 7.87-31.362 4.367-41.114-8.219-50.291-64.911-114.577-97.367-192.856-97.367-86.851 0-156.835 40.318-209.95 120.953l-47.995-28.02c-15.263-8.91-20.412-28.507-11.502-43.77a32 32 0 0 1 2.344-3.47z" />
     </StackPanel>
 </local:MyPageLeft>

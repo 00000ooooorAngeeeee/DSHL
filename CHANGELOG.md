@@ -5,7 +5,56 @@
 
 ---
 
-## [v0.4.4] — 2026-09-24
+## [v0.5.0] — 2026-09-24
+
+### 变更：设置页左栏改成用户确认的最终形态（B 方案）
+上一版我把设置页左栏收得太狠——`UiHiddenSetupUi` 也设成了 True，导致左栏只剩一项、
+随后又被 PCL 的「可选子页面少于 2 个就整块收起左栏」规则藏掉，**整条左栏都消失了**。
+用户确认他想要的（附截图）是：
+
+```
+联机
+个性化
+DSH 运行环境
+整合包管理
+```
+
+现在固定的开关改为：
+
+| 开关 | 值 | 说明 |
+|---|---|---|
+| `UiHiddenSetupLaunch` | True | 隐藏「启动」（MC 启动设置） |
+| `UiHiddenSetupSystem` | True | 隐藏「其他」 |
+| `UiHiddenSetupUi` | **False** | **保留「个性化」** —— 主题、背景图片、背景音乐这些用户要用 |
+| `UiHiddenSetupLink` | False | 保留「联机」 |
+| `UiHiddenPageOther` | True | 顶部导航隐藏「更多」 |
+
+默认子页面也改为「个性化」（即用户截图里的选中项）。
+
+### 变更：「整合包管理」从隐藏占位升级为可见条目
+原来它只是为占住下标 5 而存在的 `Visibility="Collapsed"` 占位，入口只有启动页那个按钮，太深。
+现在：
+- DSH 模式下设为可见（带上了图标），设置页左栏可直接进整合包管理
+- `PageCheck` 的 `Handles` 里补上了 `ItemManager.Check`（**不加这一条点了不会切页**）
+
+### 说明
+- 「联机」这一项由 PCL 硬编码为 `Collapsed`，本版在 DSH 模式下覆盖回可见，以贴合用户要求的形态
+  （点进去是 PCL 自带的联机页，DSH 模式下不使用，但保留更接近用户预期的布局）。
+- 左栏条数不能再少：PCL 有 `AvaliableCount < 2` 就整块收起左栏的规则，而「联机」不计入该计数，
+  所以实际计数项是 个性化 / DSH 运行环境 / 整合包管理。
+
+### 实机确认
+左栏四项与用户截图一致；右面板正常显示内容；无异常。
+
+### 变更清单
+- `ModBase.vb`：版本号 `0.4.4` → `0.5.0`。
+- `ModDshBase.vb`：`DshApplyModeHideSettings()` 里 `UiHiddenSetupUi` 改为 False。
+- `PageSetupUI.xaml.vb`：`DshApplySetupLeftVisibility()` 保留 联机/个性化/整合包管理，强制左栏可见。
+- `PageSetupLeft.xaml` / `.xaml.vb`：`ItemManager` 加图标、接入 `Handles`；默认子页面改为「个性化」。
+- `DEVNOTES.md`：新增 3 条（#67 设置页最终形态、#68 整合包管理条目要接 Handles、
+  #69 用户回字母＋截图时以截图为准）。
+
+---
 
 ### 修复：设置页左栏「时好时坏」的真正根因（用户给出的现象链定位到的）
 用户描述的现象链是决定性的：

@@ -11,7 +11,12 @@ Public Class PageSetupLeft
         '   于是左栏会漏出「启动 / 个性化 / 其他」——用户实测到的那条诡异流程就是这个原因。
         If PageLaunchLeft.DshModeEnabled() Then
             PageSetupUI.DshApplySetupLeftVisibility()
-            ItemDsh.SetChecked(True, False, False)
+            '默认选中「个性化」（用户截图里的效果：左栏 联机/个性化/DSH 运行环境/整合包管理，个性化选中）
+            If Not Settings.Get(Of Boolean)("UiHiddenSetupUi") Then
+                ItemUI.SetChecked(True, False, False)
+            Else
+                ItemDsh.SetChecked(True, False, False)
+            End If
             Return
         End If
         '是否处于隐藏的子页面
@@ -54,10 +59,15 @@ Public Class PageSetupLeft
     Public PageID As FormMain.PageSubType
     Public Sub New()
         InitializeComponent()
-        'DSH 模式（DSH 魔改）：设置页只保留「DSH 运行环境」与「整合包管理」，
-        'Minecraft 相关的启动/个性化/其他/联机全部隐藏，所以默认子页面必须是 DSH 运行环境。
+        'DSH 模式（DSH 魔改）：设置页只保留「联机 / 个性化 / DSH 运行环境 / 整合包管理」，
+        'Minecraft 的「启动」「其他」隐藏。用户明确要求保留「个性化」可见（主题、背景等启动器设置），
+        '所以默认子页面选它（就是用户截图里的效果）。
         If PageLaunchLeft.DshModeEnabled() Then
-            PageID = FormMain.PageSubType.SetupDsh
+            If Not Settings.Get(Of Boolean)("UiHiddenSetupUi") Then
+                PageID = FormMain.PageSubType.SetupUI
+            Else
+                PageID = FormMain.PageSubType.SetupDsh
+            End If
             Return
         End If
         '选择第一个未被禁用的子页面
@@ -77,7 +87,7 @@ Public Class PageSetupLeft
     ''' <summary>
     ''' 勾选事件改变页面。
     ''' </summary>
-    Private Sub PageCheck(sender As MyListItem, e As EventArgs) Handles ItemLaunch.Check, ItemSystem.Check, ItemUI.Check, ItemLink.Check, ItemDsh.Check
+    Private Sub PageCheck(sender As MyListItem, e As EventArgs) Handles ItemLaunch.Check, ItemSystem.Check, ItemUI.Check, ItemLink.Check, ItemDsh.Check, ItemManager.Check
         '尚未初始化控件属性时，sender.Tag 为 Nothing，会跳过切换，且由于 PageID 默认为 0 而切换到第一个页面
         '若使用 IsLoaded，则会导致模拟点击不被执行（模拟点击切换页面时，控件的 IsLoaded 为 False）
         If sender.Tag IsNot Nothing Then PageChange(Val(sender.Tag))

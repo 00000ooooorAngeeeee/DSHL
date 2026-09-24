@@ -110,10 +110,11 @@ Public Module ModDshBase
 
     ''' <summary>
     ''' DSH 模式下的界面隐藏默认值（启动时调用一次），即"最终设置页"要固定下来的形态：
-    '''   · 设置 － 子页面：隐藏「启动」「个性化」「其他」（全是 Minecraft 设置）
+    '''   · 设置 － 子页面：隐藏「启动」「其他」（都是 Minecraft 设置）
+    '''   · 设置 － 子页面：**保留「个性化」可见**（用户明确要求：里面是他要用的主题/背景等启动器设置）
+    '''   · 设置 － 子页面：保留「联机」开关为 False（顶部导航本来就有一处硬编码把它 Collapsed）
     '''   · 主页面：隐藏「更多」（帮助 / 关于 / 百宝箱 / 反馈 / 投票，对 DSH 无意义）
-    '''   · **保留**「联机」子页面开关为 False（顶部导航本来就有一处硬编码把它 Collapsed）、
-    '''     **保留**主页面的「启动 / 下载 / 设置」为可见（下载页要用来装 dsh，见 DEVNOTES #54）
+    '''   · 主页面：**保留**「启动 / 下载 / 设置」可见（下载页要用来装 dsh，见 DEVNOTES #54）
     ''' 这是用户明确要求的固定结果（他先在「功能隐藏」页手动勾选，再让我固化下来）。
     '''
     ''' 为什么必须走 PCL 的设置项、而不是自己设 Visibility（实机踩坑）：
@@ -125,14 +126,14 @@ Public Module ModDshBase
     Public Sub DshApplyModeHideSettings()
         Try
             If Not DshModeEnabledForStartup() Then Return
-            DshSetSetting("UiHiddenSetupLaunch", True)  '设置子页面：启动
-            DshSetSetting("UiHiddenSetupUi", True)      '设置子页面：个性化
-            DshSetSetting("UiHiddenSetupSystem", True)  '设置子页面：其他
-            DshSetSetting("UiHiddenSetupLink", False)   '设置子页面：联机（保持原样）
-            DshSetSetting("UiHiddenPageOther", True)    '主页面：更多
+            DshSetSetting("UiHiddenSetupLaunch", True)   '设置子页面：启动（隐藏）
+            DshSetSetting("UiHiddenSetupUi", False)      '设置子页面：个性化（保留——用户要用主题/背景设置）
+            DshSetSetting("UiHiddenSetupSystem", True)   '设置子页面：其他（隐藏）
+            DshSetSetting("UiHiddenSetupLink", False)    '设置子页面：联机（保持原样）
+            DshSetSetting("UiHiddenPageOther", True)     '主页面：更多（隐藏）
             DshSetSetting("UiHiddenPageDownload", False) '主页面：下载（要用来装 dsh，不能藏）
             DshSetSetting("UiHiddenPageSetup", False)    '主页面：设置
-            Logger.Info("DSH 模式：已固定界面隐藏设置（设置页只留 DSH 运行环境；顶部隐藏「更多」）")
+            Logger.Info("DSH 模式：已固定界面隐藏设置（设置页保留 联机/个性化/DSH 运行环境）")
         Catch ex As Exception
             Logger.Warn(ex, "应用 DSH 模式的界面隐藏默认值失败")
         End Try
