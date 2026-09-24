@@ -4,7 +4,7 @@
 > 记录**目标、约束、已核实的外部事实、避坑清单、进度**。
 > 改动前请先读 §7 的"工作流程"，并遵守 §8 的"注意事项"。
 
-最后更新：2026-09-24 ・ 启动器版本：`v0.3.3`
+最后更新：2026-09-24 ・ 启动器版本：`v0.3.4`
 
 ---
 
@@ -322,11 +322,27 @@ E:\DeepseekHarnessWP\tools\dotnet\dotnet.exe msbuild "Plain Craft Launcher 2\Pla
 | v0.3.1 | 2026-09-24 | 实机运行验证 + 修 3 个真 bug（启动按钮死循环、profile 初始化命令错误、非零退出码误判） | ✅ 已完成 |
 | v0.3.2 | 2026-09-24 | 端到端跑通整合包创建流程，再修 3 个真 bug（左列表下标错位导致崩溃、日期格式引号、空状态文案） | ✅ 已完成 |
 | v0.3.3 | 2026-09-24 | 机制级实测：发现并修复「浏览器 401（丢 token）」与「patch.yml 空文件致 profile 起不来」；插件开关/patch 格式获实证 | ✅ 已完成 |
-| v0.4.0 | — | 在真实 GUI 里点一次「启动 DeepSeekHarness」，确认浏览器打开的页面是 GUI 而非 401 | ⏳ 待做 |
+| v0.3.4 | 2026-09-24 | **在真实 GUI 里端到端验证通过**：回车点启动 → dsh 起来 → 抓到带 token 地址 → 浏览器打开 → HTTP 200 + `<title>DeepSeek Harness</title>`；并修复端口复用策略、增加 URL 缓存 | ✅ 已完成 |
+| v0.4.0 | — | 术语清理：启动页/关于页的 Minecraft 残留文案、账号与皮肤入口隐藏 | ⏳ 待做 |
 | v0.5.0 | — | 术语清理：启动页/关于页的 Minecraft 残留文案、账号与皮肤入口隐藏、联机页处理 | ☐ |
 | v0.6.0 | — | 引导完善：Node 下载进度提示、失败重试、镜像源切换；首次启动引导的视觉打磨 | ☐ |
 | v0.7.0 | — | 插件市场/技能导入的易用性（拖入 zip、从 URL 导入）；整合包导出/导入（.dshpack） | ☐ |
 | v1.0.0 | — | 稳定性收尾、错误处理完善、文档完善 | ☐ |
+
+### ✅ 需求 1 已在真实 GUI 中端到端验证通过（v0.3.4）
+
+证据链（全部来自真实运行的日志）：
+```
+[DSH 启动] 启动命令：node.exe "...\bin\DSH\versions\0.1.7-rc.1\node_modules\@deepseek-ai\dsh\lib\bin.js" --profile web --host 127.0.0.1 --port 3421 --no-open
+[DSH] dsh web: http://127.0.0.1:3421/?token=NeBXMAzgXkPWRencoW0LUBSy8ngIEwSy-GpjPwmGcX0
+[DSH 启动] DeepSeekHarness 已就绪：http://127.0.0.1:3421/?token=NeBXMAzgXkPWRencoW0LUBSy8ngIEwSy-GpjPwmGcX0
+[ModDshLaunch] 正在用默认浏览器打开：http://127.0.0.1:3421/?token=NeBXMAzgXkPWRencoW0LUBSy8ngIEwSy-GpjPwmGcX0
+```
+对该地址发起的实际请求：**HTTP 200**，32,959 字节，`<title>DeepSeek Harness</title>`，
+最终重定向到干净地址（token 已换成 cookie）。不带 token 访问则是 401——鉴权符合预期。
+
+退出流程也已验证：`DshStopOnExit=True` 时弹「是否一并关闭」→ 选「一并关闭」→ dsh 进程结束、
+端口释放（HTTP 000）、缓存的 token 地址被清除。
 
 ### 已知未完成 / 待验证（下一次接手先看这里）
 

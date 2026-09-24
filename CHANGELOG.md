@@ -5,6 +5,61 @@
 
 ---
 
+## [v0.3.4] — 2026-09-24
+
+**🎯 需求 1 在真实 GUI 中端到端验证通过**，并修掉验证过程中暴露的 1 个隐蔽缺陷。
+
+### 验证证据（真实运行的日志，不是推断）
+```
+[DSH 启动] 启动命令：node.exe "...\bin\DSH\versions\0.1.7-rc.1\node_modules\@deepseek-ai\dsh\lib\bin.js"
+                     --profile web --host 127.0.0.1 --port 3421 --no-open
+[DSH]      dsh web: http://127.0.0.1:3421/?token=NeBXMAzgXkPWRencoW0LUBSy8ngIEwSy-GpjPwmGcX0
+[DSH 启动] DeepSeekHarness 已就绪：http://127.0.0.1:3421/?token=NeBXMAzg...X0
+[ModDshLaunch] 正在用默认浏览器打开：http://127.0.0.1:3421/?token=NeBXMAzg...X0
+```
+对该地址发起的实际 HTTP 请求：**200**，32,959 字节，**`<title>DeepSeek Harness</title>`**，
+最终重定向到干净地址（token 已换成 cookie）。不带 token 访问为 401 —— 鉴权行为符合预期。
+
+退出流程同样验证通过：`DshStopOnExit=True` → 弹「是否一并关闭」→ 选「一并关闭」→
+dsh 进程结束、端口释放（HTTP 000）、缓存的 token 地址被自动清除。
+
+### 修复
+- **"端口通就复用"的策略是错的**。dsh 的访问 token 是**进程级**的，启动器无法事后拼出来；
+  而端口上可能是启动器不知道的 dsh 进程（实测遇到过：那个进程其实是**启动失败**的，
+  它的 401 会误导我们"复用"，用户却以为启动成功了）。
+  改为：把带 token 的可用地址**缓存到实例目录的 `.pcl-web-url`**，复用时先验证该地址当前仍可用
+  （303/200），验证不过就换空闲端口重新启动我们自己的实例。关闭 dsh 时一并清除缓存。
+
+### 新增
+- `DshCachedUrlSave` / `DshCachedUrlLoad` / `DshUrlUsable`：访问地址的缓存、读取与有效性校验。
+- `DshStateText`：一行打印 `DshIsRunning` / `DshStopOnExit` / 实例 / 端口 / URL 的诊断信息，
+  在 `EndProgram` 里打日志——排查"退出时是否结束进程"这类问题时非常省事。
+
+### 变更
+- `EndProgram` 的退出处理重写：先打诊断日志，再按设置询问，并把用户的选择也记进日志。
+- `ModBase.vb`：版本号 `0.3.3` → `0.3.4`。
+- `DEVNOTES.md`：新增 3 条记录（#29 端口复用陷阱、#30 测试脚本写 INI 的 BOM 坑、
+  #31 UI 自动化验证 PCL 界面的可行手段），并把"需求 1 已端到端验证"的证据链写进待验证清单上方。
+
+### 本轮验证方法（不依赖人手动点击）
+PCL 是自绘控件，UI Automation 里按钮只暴露为 `ControlType.Text` 且 `BoundingRectangle` 在 150% DPI 下不可信。
+改用：`PostMessage(hwnd, WM_CLOSE)` 触发正常关闭流程 + `keybd_event` 发回车（PCL 的「回车 = 点启动按钮」）
++ **以日志文件判定动作是否发生** + 窗口相对坐标小网格扫描定位控件。
+
+### 验证结果总览（8 条需求）
+| 需求 | 验证方式 | 结果 |
+|---|---|---|
+| 1 启动按钮 → dsh + 自动开浏览器 | 真实 GUI 端到端 + HTTP 实测 | ✅ 通过 |
+| 2 整合包级版本隔离 | 实例独立 DSH_HOME、端口 3080→3081 自动避让、全局实例未受影响 | ✅ 通过 |
+| 3 下载页 alpha/rc 分类 + 时间倒序 | 真实 API 数据：28 个版本、alpha 13 / rc 15、倒序正确、2 个 npm 缺失版本被标注 | ✅ 通过 |
+| 4 插件/技能开关 | patch 格式经 dsh dump 实证生效；pom 安装命令 dry-run + 真实安装通过；技能改名法按源码核对+等价验证 | ✅ 通过 |
+| 5 设置改环境/本体位置 + 首次引导 | 设置页控件在 UI 树中确认；引导流程实机走完 | ✅ 通过 |
+| 6 版本号 / CHANGELOG | v0.1.0 → v0.3.4，每轮都记 | ✅ 通过 |
+| 7 备份 | 6 个 zip 快照 + git tag | ✅ 通过 |
+| 8 DEVNOTES | 31 条避坑记录 + 构建手册 + 证据链 | ✅ 通过 |
+
+---
+
 ## [v0.3.3] — 2026-09-24
 
 **机制级实测**：直接复刻启动器会发出的命令，验证需求 1（自动开浏览器）与需求 4（插件/技能开关）背后的真实机制，

@@ -109,7 +109,9 @@ Public Module ModDshLaunch
         Loader.Progress = 0.05
         If DshIsRunning AndAlso DshProcessInstance IsNot Nothing AndAlso DshProcessInstance.PathInstance = Instance.PathInstance Then
             DshLog($"整合包 {Instance.Name} 的 DeepSeekHarness 已在运行")
-            If Instance.EffectiveAutoOpenBrowser Then DshOpenBrowser(If(DshWebUrl <> "", DshWebUrl, DshLocalUrl(Instance.Port)))
+            Dim Reuse As String = If(DshWebUrl <> "", DshWebUrl, DshCachedUrlLoad(Instance))
+            If Reuse = "" Then Reuse = DshLocalUrl(Instance.Port)
+            If Instance.EffectiveAutoOpenBrowser Then DshOpenBrowser(Reuse)
             Return
         End If
 
@@ -133,29 +135,36 @@ Public Module ModDshLaunch
         End If
 
         '2. 端口占用处理
+        '
+        '为什么不能"看到端口通就复用"（实机踩坑）：dsh 的访问 token 是**进程级**的，
+        '启动器无法事后拼出来；而且如果端口上是一个启动器不知道的 dsh 进程，
+        '直接打开干净 URL 只会得到 401。更糟的是：若我们就这么返回，用户以为启动成功了，
+        '实际并没有发起新的启动。所以这里的策略是：
+        '  ① 端口上确实有本实例此前启动的服务，且我们缓存过它的带 token 地址，且该地址**当前有效**
+        '     → 复用它开浏览器；
+        '  ② 端口被占用但没有有效缓存 → 换一个空闲端口，重新启动一个我们自己的实例。
         Loader.Progress = 0.2
         Dim Port As Integer = Instance.Port
         If Port <= 0 Then Port = DshDefaultPort
         If DshPortInUse(Port) Then
-            '端口被占用。两种情况：
-            '  (a) 本启动器拉起的进程还在（上面第 0 步已处理，这里不会走到）
-            '  (b) 上一次启动器退出后 dsh 仍在后台跑（这是期望行为）
-            '  (c) 端口被别的程序占了
-            '先探测一下它是不是 dsh：GET / 不带 token 会返回 401（说明是 dsh 且需要鉴权）。
-            Dim ProbeCode As Integer = DshProbeHttpStatus(Port)
-            If ProbeCode = 401 OrElse ProbeCode = 200 OrElse ProbeCode = 303 Then
-                DshLog($"端口 {Port} 上已有 dsh 在运行（HTTP {ProbeCode}）。", Loader)
-                DshLog("注意：dsh 的访问 token 是每个进程独有的，无法由启动器重新拼出来。", Loader)
-                DshLog("如果浏览器提示未授权，请先点「关闭 DSH」再重新启动一次。", Loader)
+            Dim Cached As String = DshCachedUrlLoad(Instance)
+            If Cached <> "" AndAlso DshUrlUsable(Cached) AndAlso Cached.Contains($":{Port}") Then
+                DshLog($"端口 {Port} 上本实例的服务仍在运行，复用缓存的访问地址", Loader)
+                DshWebUrl = Cached
                 Instance.Port = Port
-                If Instance.EffectiveAutoOpenBrowser Then DshOpenBrowser(DshLocalUrl(Port))
-                RunInUi(Sub() Hint($"端口 {Port} 上已有 dsh 在运行；若提示未授权，请先「关闭 DSH」再启动", HintType.Blue))
+                If Instance.EffectiveAutoOpenBrowser Then RunInUi(Sub() DshOpenBrowser(Cached))
+                RunInUi(Sub() Hint($"整合包「{Instance.Name}」的服务仍在运行，已打开浏览器", HintType.Green))
                 Return
             End If
-            '不是 dsh：换一个空闲端口
+            Dim ProbeCode As Integer = DshProbeHttpStatus(Port)
+            DshLog($"端口 {Port} 已被占用（HTTP {ProbeCode}），且没有可用的访问地址缓存。", Loader)
+            If ProbeCode = 401 OrElse ProbeCode = 200 OrElse ProbeCode = 303 Then
+                DshLog("该端口上确实有 dsh 在跑，但它的访问 token 属于别的进程，启动器无法复用；" &
+                       "如果你希望启动器接管它，请先手动结束那个进程（或在整合包管理页点「关闭 DSH」）。", Loader)
+            End If
             Dim NewPort As Integer = DshFindFreePort(Port + 1)
-            If NewPort <= 0 Then Throw New Exception($"端口 {Port} 被其它程序占用，且找不到可用端口")
-            DshLog($"端口 {Port} 被其它程序占用，改用 {NewPort}", Loader)
+            If NewPort <= 0 Then Throw New Exception($"端口 {Port} 被占用，且找不到可用端口")
+            DshLog($"改用空闲端口 {NewPort} 重新启动", Loader)
             Port = NewPort
             Instance.Port = NewPort
             DshWriteManifest(Instance)
@@ -227,6 +236,8 @@ Public Module ModDshLaunch
         Else
             DshLog("已按设置跳过自动打开浏览器", Loader)
         End If
+        '缓存这次可用的带 token 地址：下次启动器重启后若该 dsh 仍在后台跑，可以直接复用
+        If GotTokenUrl Then DshCachedUrlSave(Instance, DshWebUrl)
 
         Loader.Progress = 1
         RunInUi(Sub()
@@ -283,9 +294,19 @@ Public Module ModDshLaunch
         End If
         Try
             Dim Name As String = If(DshProcessInstance Is Nothing, "", DshProcessInstance.Name)
+            Dim Inst As DshInstance = DshProcessInstance
             DshCurrentProcess.Kill()
             Logger.Info($"已关闭整合包 {Name} 的 DeepSeekHarness 进程")
             If Not Quiet Then Hint($"已关闭 {Name} 的 DeepSeekHarness", HintType.Green)
+            '进程没了，缓存的 token 地址也随之失效，清掉避免下次误复用
+            If Inst IsNot Nothing Then
+                Try
+                    Dim P As String = Inst.PathInstance & ".pcl-web-url"
+                    If FileUtils.Exists(P) Then FileUtils.Delete(P)
+                Catch
+                End Try
+            End If
+            DshWebUrl = ""
         Catch ex As Exception
             Logger.Error(ex, "关闭 dsh 进程失败", LogBehavior.Toast)
         Finally
@@ -299,6 +320,74 @@ Public Module ModDshLaunch
                     End Try
                 End Sub)
     End Sub
+
+    ''' <summary>
+    ''' 诊断用：返回当前 DSH 运行状态的一句话描述（写进日志便于排查"退出时是否结束进程"之类的行为）。
+    ''' </summary>
+    Public Function DshStateText() As String
+        Dim StopOnExit As Boolean = DshSetting("DshStopOnExit", False)
+        Return $"DshIsRunning={DshIsRunning}, DshStopOnExit={StopOnExit}, " &
+               $"实例={If(DshProcessInstance Is Nothing, "无", DshProcessInstance.Name)}, " &
+               $"端口={If(DshProcessInstance Is Nothing, -1, DshProcessInstance.Port)}, " &
+               $"URL={If(DshWebUrl = "", "（未捕获）", DshWebUrl)}"
+    End Function
+
+#Region "访问地址缓存"
+
+    ''' <summary>
+    ''' 缓存某个整合包当前可用的"带 token 访问地址"。
+    ''' dsh 的 token 是进程级的，启动器重启后无法重新拼出来；缓存它，
+    ''' 就能在"上次退出时 dsh 仍在后台运行"的情况下直接复用（前提是该地址仍有效）。
+    ''' </summary>
+    Public Sub DshCachedUrlSave(Instance As DshInstance, Url As String)
+        If Instance Is Nothing OrElse String.IsNullOrWhiteSpace(Url) Then Return
+        Try
+            FileUtils.Write(Instance.PathInstance & ".pcl-web-url", Url.Trim(), New UTF8Encoding(False))
+        Catch ex As Exception
+            Logger.Warn(ex, "缓存访问地址失败")
+        End Try
+    End Sub
+
+    ''' <summary>读取缓存的访问地址；没有则返回空字符串。</summary>
+    Public Function DshCachedUrlLoad(Instance As DshInstance) As String
+        If Instance Is Nothing Then Return ""
+        Try
+            Dim P As String = Instance.PathInstance & ".pcl-web-url"
+            If Not FileUtils.Exists(P) Then Return ""
+            Return FileUtils.ReadAsString(P).Trim()
+        Catch
+            Return ""
+        End Try
+    End Function
+
+    ''' <summary>测试一个带 token 的地址当前是否仍然可用（303/200 视为可用）。</summary>
+    Public Function DshUrlUsable(Url As String) As Boolean
+        If String.IsNullOrWhiteSpace(Url) Then Return False
+        Try
+            Dim Req As Net.HttpWebRequest = CType(Net.WebRequest.Create(Url), Net.HttpWebRequest)
+            Req.Method = "GET"
+            Req.Timeout = 5000
+            Req.AllowAutoRedirect = False
+            Req.UserAgent = $"PCL2-DSH/{VersionBaseName}"
+            Using Resp As Net.HttpWebResponse = CType(Req.GetResponse(), Net.HttpWebResponse)
+                Return True
+            End Using
+        Catch ex As Net.WebException
+            '303 会以异常形式抛出（AllowAutoRedirect=False）
+            If ex.Response IsNot Nothing Then
+                Try
+                    Dim Code As Integer = CInt(CType(ex.Response, Net.HttpWebResponse).StatusCode)
+                    Return Code = 303 OrElse Code = 200
+                Catch
+                End Try
+            End If
+            Return False
+        Catch
+            Return False
+        End Try
+    End Function
+
+#End Region
 
     ''' <summary>在设置页/实例页刷新时，同步一次进程状态。</summary>
     Public Function DshProcessAlive(Instance As DshInstance) As Boolean

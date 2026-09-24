@@ -551,9 +551,17 @@ Public Class FormMain
     Public Sub EndProgram(SendWarning As Boolean)
         'DSH 魔改新增：按设置决定是否一并结束由本启动器拉起的 dsh 进程
         Try
+            Logger.Info($"退出时检查 dsh 状态：{DshStateText()}（SendWarning={SendWarning}）")
             If DshSetting("DshStopOnExit", False) AndAlso DshIsRunning Then
-                If Not SendWarning OrElse MyMsgBox("是否一并关闭正在运行的 DeepSeekHarness？", "退出提示", "一并关闭", "保持运行") = 1 Then
+                Dim CloseIt As Boolean = True
+                If SendWarning Then
+                    CloseIt = MyMsgBox("是否一并关闭正在运行的 DeepSeekHarness？", "退出提示", "一并关闭", "保持运行") = 1
+                End If
+                If CloseIt Then
                     DshStop(Quiet:=True)
+                    Logger.Info("已按设置一并结束 dsh 进程")
+                Else
+                    Logger.Info("用户选择保持 dsh 继续运行")
                 End If
             End If
         Catch ex As Exception
