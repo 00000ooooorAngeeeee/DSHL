@@ -610,8 +610,18 @@ Finish:
 
 #End Region
 
-    '版本选择按钮
+    '版本选择按钮（DSH 模式下复用为「整合包管理」入口）
     Private Sub BtnVersion_Click() Handles BtnVersion.Click
+        If DshModeEnabled() Then
+            'DSH 模式：直接进整合包管理页。
+            '必须走 Setup 的子页面路由：DshManager 这个顶级页枚举值是 10，
+            '而 FormMain.PageChange 会拿它当 PanTitleSelect.Children 的下标（顶部导航只有 5 个按钮），
+            '直接 PageChange(PageType.DshManager) 会抛 ArgumentOutOfRangeException（实机踩过）。
+            If FrmDshManager Is Nothing Then FrmDshManager = New PageDshManager
+            FrmDshManager.LoadInstance(DshInstanceSelected)
+            FrmMain.PageChange(FormMain.PageType.Setup, FormMain.PageSubType.SetupManager)
+            Return
+        End If
         If McLaunchLoader.State = LoadState.Loading Then Return
         FrmMain.PageChange(FormMain.PageType.InstanceSelect)
     End Sub
@@ -744,9 +754,16 @@ Finish:
 ExitRefresh:
         '功能隐藏
         BtnVersion.Visibility = If(Not PageSetupUI.HiddenForceShow AndAlso Settings.Get(Of Boolean)("UiHiddenFunctionSelect"), Visibility.Collapsed, Visibility.Visible)
+        'DSH 魔改：把「版本选择」复用为「整合包管理」的入口。
+        '原因（用户要求）：顶部导航的「更多」页在 DSH 模式下要隐藏，而整合包管理原本挂在
+        '「更多」页的左栏里，隐藏后就进不去了。这里改文案 + 直连管理页，入口反而更显眼。
+        '注意「任务管理」不受影响：右上角那个按钮（BtnExtraDownload，ToolTip 就是"任务管理"）是它的入口。
+        BtnVersion.Text = "整合包管理"
+        BtnMore.Text = "整合包管理"
+        BtnVersion.IsEnabled = True
         '只要已经有整合包（状态 2 或 3），就允许进整合包管理页：
         '状态 2 时用户往往正需要进去改绑定的 dsh 版本、管理插件/技能，所以这里也要显示。
-        If CurrentState >= 2 Then BtnMore.Visibility = BtnVersion.Visibility
+        If CurrentState >= 2 AndAlso CurrentState <= 3 Then BtnMore.Visibility = BtnVersion.Visibility
         'DSH 模式下不需要账号界面
         PanLogin.IsHitTestVisible = False
     End Sub

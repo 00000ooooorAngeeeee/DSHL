@@ -5,6 +5,50 @@
 
 ---
 
+## [v0.4.0] — 2026-09-24
+
+### 变更：隐藏顶部导航的「更多」页（用户要求）
+「更多」下面全是 Minecraft 相关的内容（帮助 / 关于 / 百宝箱 / 反馈 / 投票），对 DSH 启动器没有意义。
+
+**实现方式有讲究**：只把 `Visibility` 设成 `Collapsed`，**没有**从 `PanTitleSelect` 里移除元素——
+`FormMain.PageChange` 会拿顶级页枚举值当 `PanTitleSelect.Children` 的下标，
+移除元素会让下标整体错位并抛 `ArgumentOutOfRangeException`（与 v0.3.6 修复的崩溃是同一个机制）。
+
+### 变更：把「整合包管理」的入口移到启动页
+隐藏「更多」会连带丢掉一个入口——**整合包管理原本挂在「更多」页的左栏里**。
+所以把启动页左栏的按钮在 DSH 模式下复用：
+
+| 原来 | 现在 |
+|---|---|
+| 「版本选择」（进 PCL 的版本选择页） | 「**整合包管理**」（直连整合包管理页，管 dsh 版本 / 插件 / 技能） |
+
+入口反而更显眼，且不再依赖「更多」页。
+
+**「任务管理」不受影响**：它的入口是右上角那个按钮（`BtnExtraDownload`，ToolTip 就是"任务管理"），
+不依赖「更多」页。
+
+### 修复：隐藏「更多」页时会静默失败
+第一版实机冒烟测出：
+```
+W [FormMain] 隐藏「更多」页失败：调用线程无法访问此对象，因为另一个线程拥有该对象。
+```
+原因：`FormMain` 的第三阶段初始化跑在 `RunInNewThread` 里，在**后台线程**改 UI 元素的 `Visibility`
+会抛 `InvalidOperationException`——而且被我自己的 `Try/Catch` 挡住了，界面静默不变。
+现在用 `RunInUi(...)` 包装。修复后实机日志：
+```
+I [FormMain] DSH 模式：已隐藏顶部导航的「更多」页
+```
+
+### 变更
+- `ModBase.vb`：版本号 `0.3.9` → `0.4.0`。
+- `FormMain.xaml.vb`：DSH 模式下用 `RunInUi` 隐藏 `BtnTitleSelect4`。
+- `PageLaunchLeft.xaml.vb`：`BtnVersion` 在 DSH 模式下改文案为「整合包管理」，
+  `BtnVersion_Click` 直连整合包管理页（走 `Setup` 子页面路由）。
+- `DEVNOTES.md`：新增 2 条（#53 隐藏导航项只能改 Visibility 且必须 RunInUi、
+  #54 隐藏页面前先查清挂在它下面的入口）。
+
+---
+
 ## [v0.3.9] — 2026-09-24
 
 ### 修复：任务管理器卡片没显示安装的是哪个版本（用户反馈）

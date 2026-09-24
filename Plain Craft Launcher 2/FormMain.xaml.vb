@@ -435,6 +435,26 @@ Public Class FormMain
             If VersionBranchMain = "OpenSource" AndAlso Not DshModeEnabledForStartup() Then
                 MyMsgBox($"该版本中无法使用以下特性：{vbCrLf}- CurseForge API 调用：需要自行申请 API Key，然后添加到 ModSecret.vb 的开头{vbCrLf}- 正版登录：需要自行向微软申请 Client ID，然后添加到 ModSecret.vb 的开头{vbCrLf}- 更新与联网通知：避免滥用隐患{vbCrLf}- 主题切换：这是需要赞助解锁的纪念性质的功能，别让赞助者太伤心啦……{vbCrLf}- 百宝箱：开发早期往里面塞了些开发工具，整理起来太麻烦了……", "开源版本说明")
             End If
+            'DSH 魔改：隐藏顶部导航的「更多」页。
+            '原因（用户要求）：「更多」下面全是 Minecraft 相关的内容（帮助 / 关于 / 百宝箱 / 反馈 / 投票），
+            '对 DSH 启动器没有意义。
+            '实现方式很关键：只把 Visibility 设成 Collapsed，**绝对不要从 PanTitleSelect 里移除元素**——
+            'FormMain.PageChange 会拿顶级页枚举值当 PanTitleSelect.Children 的下标（见 DEVNOTES #35），
+            '移除元素会让下标整体错位、直接抛 ArgumentOutOfRangeException。
+            '「任务管理」不受影响：它的入口是右上角那个按钮（BtnExtraDownload，ToolTip 就是"任务管理"）。
+            If DshModeEnabledForStartup() Then
+                '必须 RunInUi：这段初始化跑在后台线程（RunInNewThread），
+                '而 BtnTitleSelect4 是 UI 线程创建的元素，后台线程直接改 Visibility 会抛
+                'InvalidOperationException"调用线程无法访问此对象，因为另一个线程拥有该对象"（实机踩过）。
+                RunInUi(Sub()
+                            Try
+                                BtnTitleSelect4.Visibility = Visibility.Collapsed
+                                Logger.Info("DSH 模式：已隐藏顶部导航的「更多」页")
+                            Catch ex As Exception
+                                Logger.Warn(ex, "隐藏「更多」页失败")
+                            End Try
+                        End Sub)
+            End If
         End Sub, "初始化", ThreadPriority.Lowest)
 
         Logger.Info($"第三阶段加载用时：{GetTimeMs() - ApplicationStartTick} ms")
