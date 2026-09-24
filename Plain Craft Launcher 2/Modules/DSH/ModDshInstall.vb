@@ -293,11 +293,21 @@ Public Module ModDshInstall
         '4. 搬到版本仓库
         DshLog($"正在部署到版本仓库：{Target}")
         If DirectoryUtils.Exists(Target) Then
-            Try
-                DirectoryUtils.Delete(Target, toRecycleBin:=True)
-            Catch ex As Exception
-                Throw New Exception($"无法覆盖已存在的版本目录 {Target}：" & ex.Message)
-            End Try
+            '关键（实机踩坑）：先把占着这个版本目录的 dsh 进程结束掉。
+            '典型场景：这个版本之前装到一半失败、残留了残缺的 node_modules（目录很小），
+            '但启动器当时已经把它 pull 起来过，进程还在跑并**加载着 koffi.node 这个原生 DLL**
+            '（@koromix/koffi-win32-x64 是平台专用包，不会被 npm 去重，必然是独立文件）。
+            'Windows 会锁住被加载的 DLL → 删不掉旧目录 → 报
+            '  无法覆盖已存在的版本目录 ...：对路径"...\koffi.node"的访问被拒绝
+            '用户看到的就是一长串 COMException 堆栈。这里先杀进程再删。
+            DshStopVersionProcesses(Target)
+            If Not DshTryDeleteDirectory(Target) Then
+                Throw New Exception(
+                    $"无法覆盖已存在的版本目录：{Target}{vbCrLf}" &
+                    "该目录里有文件正被其它程序占用（多半是还在运行的 dsh 进程，或杀毒软件）。" & vbCrLf &
+                    "请关闭所有使用该版本的 dsh 后重试；实在不行可手动删除该目录。" & vbCrLf &
+                    "（提示：在整合包管理页点「关闭 DSH」可以结束启动器拉起的进程）")
+            End If
         End If
         DirectoryUtils.Create(Target)
         DshReportStatus("正在部署到版本仓库……", 0.94)
@@ -425,6 +435,109 @@ Public Module ModDshInstall
             Return 0
         End Try
     End Function
+
+    ''' <summary>
+    ''' 结束所有"命令行里引用了该版本目录"的 node 进程。
+    '''
+    ''' 为什么需要（实机踩坑）：安装失败过一次之后，版本目录里可能残留残缺的 node_modules，
+    ''' 而启动器当时已经把这个版本 pull 起来过 —— 那个进程还在跑，并且加载着 `koffi.node`
+    ''' 这个原生 DLL（`@koromix/koffi-win32-x64` 是平台专用包，不会被 npm 去重，必然是独立文件）。
+    ''' Windows 会锁住被加载的 DLL，于是重装时"删不掉旧目录"，
+    ''' 报错是 `无法覆盖已存在的版本目录 ...：对路径"...\koffi.node"的访问被拒绝`。
+    ''' 这里按命令行匹配把它结束掉，再删目录。
+    ''' </summary>
+    Private Sub DshStopVersionProcesses(Target As String)
+        Try
+            Dim TargetNoSlash As String = PathUtils.RemoveSlashSuffix(Target).ToLowerInvariant()
+            Dim Killed As Integer = 0
+            For Each P As Process In Process.GetProcessesByName("node")
+                Try
+                    Dim Cmd As String = ""
+                    Using S As Management.ManagementObject = New Management.ManagementObject($"Win32_Process.Handle='{P.Id}'")
+                        Cmd = If(TryCast(S("CommandLine"), String), "")
+                    End Using
+                    If Cmd <> "" AndAlso Cmd.ToLowerInvariant().Contains(TargetNoSlash) Then
+                        DshKillProcessTree(P)
+                        Killed += 1
+                    End If
+                Catch
+                End Try
+            Next
+            If Killed > 0 Then
+                DshLog($"已结束 {Killed} 个占用该版本目录的进程")
+                '进程没了，启动器记录的"当前运行实例"也就失效了，让界面回到"未运行"
+                DshClearRunningState()
+                Thread.Sleep(600) '给系统一点时间释放文件句柄
+            End If
+        Catch ex As Exception
+            Logger.Warn(ex, "结束占用版本目录的进程失败")
+        End Try
+    End Sub
+
+    ''' <summary>
+    ''' 删除目录，带重试与两种兜底。
+    ''' 返回 False 表示确实删不掉（文件被别的东西占着）。
+    '''
+    ''' 注意 **不要走回收站**（`toRecycleBin:=True`）：经验上它对这种"被占用的原生 DLL"
+    ''' 会抛 `COMException: HRESULT 0x80270000`（就是日志里那条"无法将文件夹删除到回收站"），
+    ''' 白绕一圈还丢掉真实原因。
+    ''' 兜底顺序：① 直接删（重试）→ ② 改名挪到一边再删（改名只需要目录本身没被独占，
+    ''' 比逐个删文件宽容得多）→ ③ 实在不行就失败并让调用方给人话提示。
+    ''' </summary>
+    Private Function DshTryDeleteDirectory(Path As String) As Boolean
+        For Attempt As Integer = 1 To 5
+            Try
+                If Not DirectoryUtils.Exists(Path) Then Return True
+                DirectoryUtils.Delete(Path)
+                Return True
+            Catch ex As Exception
+                If Attempt = 5 Then
+                    Logger.Warn(ex, $"删除目录失败（已重试 5 次）：{Path}")
+                Else
+                    Thread.Sleep(400 * Attempt)
+                End If
+            End Try
+        Next
+        '兜底：改名挪到一边
+        Try
+            Dim Aside As String = PathUtils.RemoveSlashSuffix(Path) & "-old-" & GetTimeMs() & "\"
+            DirectoryUtils.Move(PathUtils.RemoveSlashSuffix(Path), PathUtils.RemoveSlashSuffix(Aside))
+            DshLog($"原目录删不掉，已挪到一边：{Aside}")
+            '用 DirectoryUtils.GetInfo(...).Parent 取父目录（PathUtils 没有 GetDirectoryName）
+            DshCleanStaleVersionDirs(DirectoryUtils.GetInfo(PathUtils.RemoveSlashSuffix(Path)).Parent.FullName)
+            Return True
+        Catch ex As Exception
+            Logger.Warn(ex, $"把旧版本目录挪到一边也失败：{Path}")
+        End Try
+        Return False
+    End Function
+
+    ''' <summary>后台清理"被挪到一边"的旧版本目录（*-old-*），失败就算了，下次启动还会试。</summary>
+    Private Sub DshCleanStaleVersionDirs(Parent As String)
+        Dim Stale As New List(Of String)
+        Try
+            For Each Dir As String In DirectoryUtils.EnumerateDirectories(Parent, searchPattern:="*-old-*")
+                Stale.Add(Dir)
+            Next
+        Catch ex As Exception
+            Logger.Warn(ex, "扫描挪到一边的旧版本目录失败")
+            Return
+        End Try
+        For Each Dir As String In Stale
+            Dim Target As String = Dir
+            Task.Run(Sub()
+                         For i As Integer = 1 To 6
+                             Try
+                                 DirectoryUtils.Delete(Target)
+                                 DshLog($"已清理挪到一边的旧版本目录：{Target}")
+                                 Exit For
+                             Catch
+                                 Thread.Sleep(1500)
+                             End Try
+                         Next
+                     End Sub)
+        Next
+    End Sub
 
     ''' <summary>
     ''' 执行一次 npm 命令，实时把输出喂给 Loader 的日志与进度。

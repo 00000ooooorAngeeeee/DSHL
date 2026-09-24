@@ -5,7 +5,57 @@
 
 ---
 
-## [v0.6.0] — 2026-09-24
+## [v0.6.1] — 2026-09-24
+
+### 修复：重装 dsh 时报「无法覆盖已存在的版本目录 … koffi.node 的访问被拒绝」（用户实报）
+日志里的完整报错链：
+```
+无法将文件夹删除到回收站，回退到永久删除：...\versions\0.1.7-rc.1\
+  （COMException: HRESULT 0x80270000）
+→ 无法覆盖已存在的版本目录：对路径"...\node_modules\@koromix\koffi-win32-x64\win32_x64\koffi.node"的访问被拒绝
+```
+
+**根因**：
+1. `@koromix/koffi-win32-x64` 是**平台专用包**（文件名带 `-win32-x64` 的那种不会被 npm 去重），
+   所以它必然是 `node_modules` 下的**独立原生 DLL**（`koffi.node`）；
+2. 之前这个版本**装到一半失败、残留了残缺目录**（实测只剩 1 个文件、没有 `.dsh-installed`），
+   但启动器当时已经把它 pull 起来过，**那个 dsh 进程还在跑并加载着 `koffi.node`**；
+3. Windows 锁住被加载的 DLL → 删不掉旧目录 → 覆盖失败，用户看到一长串 COM 堆栈。
+
+**修法**（`ModDshInstall` 新增三个函数）：
+| 函数 | 作用 |
+|---|---|
+| `DshStopVersionProcesses(Target)` | 按命令行匹配（`Win32_Process.CommandLine` 含该版本目录路径）找出并结束所有相关 `node.exe`（走 `taskkill /T /F` 整棵树），随后 `DshClearRunningState()` 复位启动器的运行状态 |
+| `DshTryDeleteDirectory(Path)` | 直接删 + 5 次递增重试；失败再**改名挪到一边**（改名比逐个删文件宽容得多）；都不行才失败 |
+| `DshCleanStaleVersionDirs(Parent)` | 后台清理被挪到一边的 `*-old-*` 目录 |
+
+顺带**不再走回收站**：对这种被占用的原生 DLL，`toRecycleBin:=True` 会抛 `HRESULT 0x80270000`，
+白绕一圈还把真实原因埋掉。删不掉时改为给用户**人话提示**（哪个目录、可能什么原因、怎么处理），
+而不是只抛 COM 堆栈。
+
+**实机验证**（正好用你那份出问题的现场，没有删任何东西）：
+```
+正在部署到版本仓库：...\versions\0.1.7-rc.1\
+已结束 1 个占用该版本目录的进程          ← 新逻辑生效
+added 512 packages in 40s
+dsh 0.1.7-rc.1 安装完成
+版本仓库 0.1.7-rc.1: 文件 27575 个, bin.js=True, marker=True   ← 完整了
+```
+
+### 变更
+- `ModBase.vb`：版本号 `0.6.0` → `0.6.1`。
+- `ModDshInstall.vb`：新增上述三个函数；部署阶段改为"先结束占用进程 → 再删目录"。
+- `ModDshLaunch.vb`：新增 `DshClearRunningState()`。
+- `DEVNOTES.md`：新增 3 条（#79 覆盖前必须先结束占用的 dsh 进程、
+  #80 删目录不要走回收站、#81 **用户要求非必要不要删 `bin\DSH` / `bin\PCL`**）。
+
+### 关于测试方式的调整（按用户要求）
+以前我为了"干净环境"会删 `bin\DSH` 与 `bin\PCL` —— 前者是已下载的 dsh（重装要下 500+ 个包），
+后者是用户设置（主题、隐藏开关、整合包选择），**每次启动都重下确实很烦**。
+今后非必要不再删；需要干净环境时优先用**临时目录 + junction**，或只做只读检查；
+确实要清就先备份 `Setup.ini`。
+
+---
 
 ### 修复：个性化里的主题颜色点了不生效（用户反馈）
 这**不是本项目的改动导致的**，是 PCL 开源版的功能缺失 —— 证据链：

@@ -556,6 +556,33 @@ E:\DeepseekHarnessWP\
     另外**不要在 `ThemeCheckAll` 里碰控件** —— 启动早期它被 `FormMain` 调用时
     `FrmSetupUI` 还是 `Nothing`，会抛"未将对象引用设置到对象的实例"（实测踩过）。
 
+79. **重装/覆盖 dsh 版本前必须先结束占用该版本的 dsh 进程**（用户实报的 bug）。
+    现象：装到"正在部署到版本仓库"时报
+        无法将文件夹删除到回收站，回退到永久删除：...\versions\0.1.7-rc.1\
+        （COMException: HRESULT 0x80270000）
+        无法覆盖已存在的版本目录：对路径"...\node_modules\@koromix\koffi-win32-x64\win32_x64\koffi.node"的访问被拒绝
+    根因链：
+      · `@koromix/koffi-win32-x64` 是**平台专用包**（文件名带 -win32-x64 的那种不会被 npm 去重），
+        所以它必然是 `node_modules` 下的**独立原生 DLL**（koffi.node）；
+      · 之前这个版本装到一半失败、残留了残缺目录，但当时启动器已经把它 pull 起来过，
+        **那个进程还在跑并加载着 koffi.node**；
+      · Windows 锁住被加载的 DLL → 删不掉旧目录 → 覆盖失败。
+    修法（`DshStopVersionProcesses`）：按命令行匹配（`Win32_Process.CommandLine` 含该版本目录路径）
+    找出所有 `node.exe` 并结束整棵进程树，然后 `DshClearRunningState()` 复位启动器的运行状态，
+    再删目录。
+    实测：日志出现「已结束 1 个占用该版本目录的进程」，随后 512 包正常落盘、`bin.js` 与 marker 齐全。
+
+80. **删目录不要走回收站**：对这种"被占用的原生 DLL"，`toRecycleBin:=True` 会抛
+    `COMException: HRESULT 0x80270000`，白绕一圈还把真实原因（哪个文件被锁）埋掉。
+    直接删 + 重试 + 失败时**改名挪到一边**（改名比逐个删文件宽容得多，只要目录本身没被独占），
+    并给用户人话提示（是哪个目录、可能是什么原因、怎么处理），不要只抛 COM 堆栈。
+
+81. **用户明确要求：非必要不要删 `bin\DSH` 与 `bin\PCL`**。
+    前者是已下载的 dsh 版本仓库（重装要下 500+ 个包、约 1 分钟），
+    后者是用户设置（主题、隐藏开关、整合包选择）。**每次启动都要重下会很烦。**
+    → 测试时如果要"干净环境"，优先用**临时目录 + junction**，或者只做只读检查；
+      确实需要清就**先备份 `Setup.ini`**（本次备份到了 `E:\DeepseekHarnessWP\_setup_backup.ini`）。
+
 ---
 
 ## 8b. 本地构建环境搭建记录（v0.3.0 完成）

@@ -322,6 +322,31 @@ Public Module ModDshLaunch
     End Sub
 
     ''' <summary>
+    ''' 把启动器记录的"正在运行的 dsh"状态清空。
+    ''' 用在"进程被外部（例如安装流程的 DshStopVersionProcesses）结束掉"之后，
+    ''' 否则界面会一直显示"运行中"、按钮也停在"打开 DeepSeekHarness"，点下去还会去连一个已死的端口。
+    ''' </summary>
+    Public Sub DshClearRunningState()
+        Dim Inst As DshInstance = DshProcessInstance
+        DshCurrentProcess = Nothing
+        DshProcessInstance = Nothing
+        DshWebUrl = ""
+        If Inst IsNot Nothing Then
+            Try
+                Dim P As String = Inst.PathInstance & ".pcl-web-url"
+                If FileUtils.Exists(P) Then FileUtils.Delete(P)
+            Catch
+            End Try
+        End If
+        RunInUi(Sub()
+                    Try
+                        FrmLaunchLeft?.RefreshButtonsUI()
+                    Catch
+                    End Try
+                End Sub)
+    End Sub
+
+    ''' <summary>
     ''' 诊断用：返回当前 DSH 运行状态的一句话描述（写进日志便于排查"退出时是否结束进程"之类的行为）。
     ''' </summary>
     Public Function DshStateText() As String
