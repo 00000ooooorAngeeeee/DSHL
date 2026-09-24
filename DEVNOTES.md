@@ -4,7 +4,7 @@
 > 记录**目标、约束、已核实的外部事实、避坑清单、进度**。
 > 改动前请先读 §7 的"工作流程"，并遵守 §8 的"注意事项"。
 
-最后更新：2026-09-24 ・ 启动器版本：`v0.7.0`
+最后更新：2026-09-24 ・ 启动器版本：`v0.7.1`
 
 ---
 
@@ -691,6 +691,31 @@ E:\DeepseekHarnessWP\
     搜索界面用这两条做标记与排序（`LooksLikePlugin`），比只按包名猜准得多。
     另外搜索 URL 要**沿用用户配置的 registry**（`DshNpmSource`：0=官方 1=国内镜像），
     否则会出现"安装走镜像、搜索走官方"的割裂（国内直连 registry.npmjs.org 又慢又可能不通）。
+
+92. **★ 判断"有哪些插件"只能读 `dsh.profile.bundles`，绝不能扫 profile 的 `node_modules`。**
+    （用户实报"插件扫描逻辑有误，请隐藏 dsh 原生自带的插件"）
+    我第二版改成"扫 node_modules 列出实体包"，结果界面显示 **共 165 个插件** —— 实测该整合包
+    只装了 4 个插件（dshmarket / dsh-better-sidebar / dsh-balance-plugin / dsh-bottom-info-bar），
+    但 profile 的 `node_modules` 里躺着 **165 个包**，因为那是 npm/pnpm 的**扁平依赖目录**，
+    把插件的**全部传递依赖**（d3、mermaid、codemirror、@types/* …）都摊在顶层。
+    同时 `@deepseek-ai/cosmokit`、`@deepseek-ai/schemastery` 也通过这种枚举泄漏成了"插件"。
+    → 正解：
+      · 只读 `dsh.profile.bundles`（那才是 dsh 的"插件层"权威列表，`dsh plugin add` 会往里写）
+      · 其中 **`@deepseek-ai/` 开头的一律视为 dsh 原生自带并隐藏**
+        （含 dsh-base / dsh-web-app 等基础层，以及 schemastery / cosmokit 这类不带 dsh- 前缀的官方包）
+      · 版本与说明再从 `node_modules\<包名>\package.json` 里读（**按名取**，不枚举）
+    实测：165 → **4**，且不再出现任何 `@deepseek-ai/*`。
+    **教训：npm 的 `node_modules` 是"依赖目录"而不是"用户装了什么的目录"，
+      要判断"用户装了什么"必须看声明文件（package.json 的 dependencies / bundles），不能看摊平的目录。**
+
+93. **验证 UI 时要"直接点到目标控件"，别用 Tab 序列硬数。**
+    我为了进管理页按了固定次数的 Tab+回车，结果误触「启动」按钮，
+    **真的把该整合包的 dsh 拉起来了、还打开了浏览器**（用户环境里留下了副作用）。
+    正确做法（一直在用、这次却忘了）：先用 UI Automation 读出目标控件的
+    `BoundingRectangle`，把中心点换算成物理坐标，再点那一个坐标。
+    读数不受 DPI 缩放影响时可直接用（同一次读数里"左栏两项相距 36 像素"正好等于 XAML 的
+    `Height="36"`，可用来验证 1:1）。
+    **教训：任何会点到界面的自动化，都要"瞄准具体控件"，不要依赖焦点顺序。**
 
 ---
 

@@ -5,7 +5,55 @@
 
 ---
 
-## [v0.7.0] — 2026-09-24
+## [v0.7.1] — 2026-09-24
+
+### 修复：插件扫描把传递依赖和 dsh 原生包都当成了插件（用户反馈）
+用户反馈"插件扫描逻辑有误，请隐藏 dsh 原生自带的插件"。一查发现问题比预期严重得多：
+
+```
+共 165 个插件 · profile: web · 启用 165 / 关闭 0
+```
+
+而该整合包**实际只装了 4 个插件**。
+
+**根因**：我上一版改成"扫 profile 的 `node_modules` 列出实体包"。但那个目录是
+**npm/pnpm 的扁平依赖目录** —— 它把插件的**全部传递依赖**都摊在顶层，
+实测有 165 个包（`d3`、`mermaid`、`codemirror`、`@types/*` …）。
+`@deepseek-ai/cosmokit`、`@deepseek-ai/schemastery` 也是通过这种枚举泄漏成了"插件"。
+
+**修法**：判定依据只保留 `dsh.profile.bundles` —— 那才是 dsh 的"插件层"权威列表
+（`dsh plugin add` 会往里写）：
+- 只读 `dsh.profile.bundles`
+- 其中 **`@deepseek-ai/` 开头的一律视为 dsh 原生自带并隐藏**
+  （含 `dsh-base`/`dsh-web-app` 基础层，以及 `schemastery`/`cosmokit` 这类不带 `dsh-` 前缀的官方包）
+- 其余条目即用户插件；版本与说明改成**按包名**去 `node_modules\<名>\package.json` 读，不再枚举目录
+- 顺带补上 `dependencies` 里"已声明但当前不在 bundles 中"的条目，保证这类插件仍能被看到并卸载
+
+**实机验证**（整合包 `My`）：
+```
+扫描插件（整合包 My）：bundles 里非官方条目 4 个，其中已落盘 4 个
+共 4 个插件 · profile: web · 启用 4 / 关闭 0
+  dsh-balance-plugin   v0.2.2   DeepSeek wallet-balance readout at the sidebar foot…
+  dsh-better-sidebar   v0.2.1   Better Sidebar for DSH — file tree, editor, changes…
+  dsh-bottom-info-bar  v1.15.0  Shows the current model, balance and spend…
+  dshmarket            v1.58.0  Visual plugin market inside DeepSeek Harness…
+```
+**165 → 4**，且不再出现任何 `@deepseek-ai/*`。
+
+### 教训（DEVNOTES #92/#93）
+1. **npm 的 `node_modules` 是"依赖目录"而不是"用户装了什么的目录"**。
+   要判断"用户装了什么"必须看声明文件（package.json 的 `dependencies`/`bundles`），不能看摊平的目录。
+2. **验证 UI 要"直接点到目标控件"，别用 Tab 序列硬数**。我这次按固定次数 Tab+回车，
+   结果误触「启动」按钮，**真的把该整合包的 dsh 拉起来了、还打开了浏览器**，在用户环境里留下副作用。
+   正确做法是先用 UI Automation 读出目标控件的 `BoundingRectangle`，换算成物理坐标后点那一个点。
+
+### 变更
+- `ModDshHome.vb`：重写 `DshScanPlugins`（只读 bundles + 隐藏 `@deepseek-ai/` + 按名取版本）；
+  新增常量 `DshOfficialScope`；删除已被取代的 `DshBaseBundleNames` 白名单；加扫描诊断日志。
+- `ModBase.vb`：版本号 `0.7.0` → `0.7.1`。
+- `DEVNOTES.md`：新增 2 条（#92 node_modules 不是"用户装了什么"、#93 验证 UI 要瞄准控件）。
+
+---
 
 ### 修复：插件"似乎不会真的安装"（用户反馈）+ 插件包名难找
 

@@ -312,53 +312,61 @@ Public Module ModDshHome
     End Function
 
     ''' <summary>
-    ''' profile 里"框架自带"的基础 bundle 名单。
-    ''' 为什么要专门列一份（实机踩坑）：`dsh plugin add` 成功后会**自动把包名也写进**
-    ''' `dsh.profile.bundles`（实测：装 dshmarket 后 bundles 变成
-    ''' [dsh-base, dsh-web-app, dshmarket]）。如果拿"在 bundles 里"当作内置包的判据，
-    ''' 用户刚装的插件就会被当成内置包**隐藏掉、也没法卸载** ——
-    ''' 界面表现就是"装完了列表里看不到"，即用户反馈的"似乎不会真的安装"。
+    ''' ★ `@deepseek-ai/` 是 dsh 官方的包命名空间（dsh-base、dsh-web-app、schemastery、cosmokit…）。
+    ''' 这些是"框架自带"的，界面上不该出现，所以一律隐藏。
     ''' </summary>
-    Private ReadOnly DshBaseBundleNames As String() = {
-        "@deepseek-ai/dsh-base",
-        "@deepseek-ai/dsh-web-app",
-        "@deepseek-ai/dsh-app-boot"
-    }
+    Private Const DshOfficialScope As String = "@deepseek-ai/"
 
     ''' <summary>
-    ''' 扫描整合包的插件列表：
-    '''   1. profile package.json 的 dependencies（用户装的插件）
-    '''   2. node_modules 下实际存在的包（以文件系统为准，能反映真实状态）
-    '''   3. profile package.json 的 dsh.profile.bundles 里**非基础**的条目（dsh plugin add 会写进来）
-    ''' 并读取 cordis.patch.yml 判断哪些被 disable 了。
+    ''' 扫描整合包的插件列表。
+    '''
+    ''' ★★ 判定依据**只能**是 `dsh.profile.bundles` —— 那是 dsh 的"插件层"权威列表。
+    ''' 为什么不能扫 node_modules（第二版犯的错，用户实报）：
+    '''   profile 的 `node_modules` 是 **npm/pnpm 的扁平依赖目录**，把插件的**全部传递依赖**都摊在里面。
+    '''   实测该整合包只装了 4 个插件（dshmarket / dsh-better-sidebar / dsh-balance-plugin /
+    '''   dsh-bottom-info-bar），但 node_modules 下有 **165 个包**（d3、mermaid、codemirror、@types/* …），
+    '''   照它枚举就会显示"共 165 个插件"，把用户吓一跳，也会把 @deepseek-ai/cosmokit、
+    '''   @deepseek-ai/schemastery 这种官方包当成插件列出来。
+    '''
+    ''' 规则：
+    '''   · 只读 `dsh.profile.bundles`
+    '''   · 其中 `@deepseek-ai/` 开头的一律当"dsh 原生自带"隐藏（含 dsh-base / dsh-web-app 等基础层）
+    '''   · 其余的都用 `dsh plugin add` 装进来的插件，照常列出（可在 node_modules 里查到版本与说明）
+    '''   · 另外把 profile 的 `dependencies` 里"已声明但当前不在 bundles 中"的也补上，
+    '''     这样被搬出 bundles 的插件仍能被看到并卸载（历史遗留兼容）
     ''' </summary>
     Public Function DshScanPlugins(Instance As DshInstance) As List(Of DshPlugin)
         Dim Result As New List(Of DshPlugin)
         Dim ProfileDir As String = DshProfileDir(Instance)
         Dim PkgPath As String = ProfileDir & "package.json"
-        Dim BuiltInNames As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
-        Dim Deps As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
+        Dim NmDir As String = ProfileDir & "node_modules\"
+
+        '包名 → 声明的版本范围（bundles 里的没有版本号，留空由 node_modules 补）
+        Dim Names As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
+        Dim InBundles As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
 
         If FileUtils.Exists(PkgPath) Then
             Try
                 Dim Pkg As JObject = JObject.Parse(FileUtils.ReadAsString(PkgPath))
+                '① 权威来源：dsh.profile.bundles
                 Dim Bundles As JToken = Pkg.SelectToken("dsh.profile.bundles")
                 If Bundles IsNot Nothing AndAlso Bundles.Type = JTokenType.Array Then
                     For Each B As JToken In CType(Bundles, JArray)
-                        Dim Name As String = B.ToString()
-                        '只有框架自带的那几个才算"内置"；其余出现在 bundles 里的是 dsh plugin add 写的，
-                        '属于用户插件，必须照常列出（否则刚装的插件会"消失"，见 DshBaseBundleNames 的说明）
-                        If DshBaseBundleNames.Contains(Name, StringComparer.OrdinalIgnoreCase) Then
-                            BuiltInNames.Add(Name)
-                        Else
-                            Deps(Name) = ""
-                        End If
+                        Dim Name As String = B.ToString().Trim()
+                        If Name = "" Then Continue For
+                        'dsh 原生自带的一律隐藏（这就是用户要求的"隐藏 dsh 原生自带的插件"）
+                        If Name.StartsWith(DshOfficialScope, StringComparison.OrdinalIgnoreCase) Then Continue For
+                        Names(Name) = ""
+                        InBundles.Add(Name)
                     Next
                 End If
+                '② 兼容：dependencies 里声明了、但已不在 bundles 里的（历史遗留，仍可卸载）
                 Dim DepsNode As JObject = TryCast(Pkg("dependencies"), JObject)
                 If DepsNode IsNot Nothing Then
                     For Each P As JProperty In DepsNode.Properties()
-                        Deps(P.Name) = P.Value.ToString()
+                        Dim Name As String = P.Name
+                        If Name.StartsWith(DshOfficialScope, StringComparison.OrdinalIgnoreCase) Then Continue For
+                        If Not Names.ContainsKey(Name) Then Names(Name) = P.Value.ToString()
                     Next
                 End If
             Catch ex As Exception
@@ -366,44 +374,25 @@ Public Module ModDshHome
             End Try
         End If
 
-        '实际存在的包
-        Dim NmDir As String = ProfileDir & "node_modules\"
-        If DirectoryUtils.Exists(NmDir) Then
-            For Each Dir As String In DirectoryUtils.EnumerateDirectories(NmDir)
-                Dim FolderName As String = PathUtils.GetLastPart(Dir)
-                If FolderName.StartsWith(".") Then Continue For
-                If FolderName.StartsWith("@") Then
-                    '作用域包
-                    For Each Sub_ As String In DirectoryUtils.EnumerateDirectories(Dir)
-                        Dim SubName As String = PathUtils.GetLastPart(Sub_)
-                        If SubName.StartsWith(".") Then Continue For
-                        Dim Full As String = FolderName & "/" & SubName
-                        '只过滤框架自带的基础包，不去按 dsh- 前缀一刀切
-                        If BuiltInNames.Contains(Full) Then Continue For
-                        Deps(Full) = DshReadInstalledVersion(Sub_)
-                    Next
-                Else
-                    If BuiltInNames.Contains(FolderName) Then Continue For
-                    If Not Deps.ContainsKey(FolderName) Then Deps(FolderName) = DshReadInstalledVersion(Dir)
-                End If
-            Next
-        End If
-
         Dim Disabled As Dictionary(Of String, String) = DshReadDisabledPlugins(Instance)
 
-        For Each Pair As KeyValuePair(Of String, String) In Deps
+        For Each Pair As KeyValuePair(Of String, String) In Names
             Dim InstalledDir As String = NmDir & Pair.Key.Replace("/", "\")
+            Dim Installed As Boolean = DirectoryUtils.Exists(InstalledDir)
+            Dim InstVer As String = If(Installed, DshReadInstalledVersion(InstalledDir), "")
             Dim Plugin As New DshPlugin With {
                 .PackageName = Pair.Key,
-                .Version = If(DshReadInstalledVersion(InstalledDir) <> "", DshReadInstalledVersion(InstalledDir), Pair.Value),
-                .IsBuiltIn = BuiltInNames.Contains(Pair.Key),
+                .Version = If(InstVer <> "", InstVer, Pair.Value),
+                .IsBuiltIn = False,
                 .Enabled = Not Disabled.ContainsKey(Pair.Key),
-                .Installed = DirectoryUtils.Exists(InstalledDir),
-                .Description = DshReadPluginDescription(InstalledDir)
+                .Installed = Installed,
+                .Description = If(Installed, DshReadPluginDescription(InstalledDir), "")
             }
             If Not Plugin.Enabled Then Plugin.DisabledReason = Disabled(Plugin.PackageName)
             Result.Add(Plugin)
         Next
+        DshLog($"扫描插件（整合包 {Instance.Name}）：bundles 里非官方条目 {Names.Count} 个，" &
+               $"其中已落盘 {Result.Where(Function(P) P.Installed).Count()} 个")
         Return Result.OrderBy(Function(p) p.PackageName, StringComparer.OrdinalIgnoreCase).ToList()
     End Function
 
