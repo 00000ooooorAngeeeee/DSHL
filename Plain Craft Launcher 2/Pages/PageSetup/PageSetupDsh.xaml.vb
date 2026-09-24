@@ -61,18 +61,22 @@ Public Class PageSetupDsh
 
 #Region "按钮"
 
-    Private Sub InstallNode_Click(sender As Object, e As EventArgs)
+    '注意（实机踩坑）：PCL 的 MyButton.Click 委托是 MouseButtonEventArgs，**不是 EventArgs**。
+    '写成 EventArgs 时页面构造就会抛 XamlParseException（"无法从文本 X 创建 Click"），
+    '整个设置页打不开。PageDownloadDsh 里的 MyIconButton 处理函数是同一类约定。
+
+    Private Sub InstallNode_Click(sender As Object, e As MouseButtonEventArgs)
         If MyMsgBox("将从 npmmirror 镜像下载 Node.js 到启动器目录下：" & vbCrLf &
                     DshRuntimeRoot & vbCrLf & vbCrLf &
                     "下载完成后会自动解压并接管，是否继续？", "下载 Node.js", "下载", "取消") <> 1 Then Return
         DshNodeInstallLoader.Start(0, IsForceRestart:=True)
     End Sub
 
-    Private Sub OpenDownload_Click(sender As Object, e As EventArgs)
+    Private Sub OpenDownload_Click(sender As Object, e As MouseButtonEventArgs)
         FrmMain.PageChange(FormMain.PageType.Download, FormMain.PageSubType.DownloadDsh)
     End Sub
 
-    Private Sub OpenFolder_Click(sender As Object, e As EventArgs)
+    Private Sub OpenFolder_Click(sender As Object, e As MouseButtonEventArgs)
         Try
             DirectoryUtils.Create(DshVersionRoot)
             OpenExplorer(DshVersionRoot)

@@ -5,6 +5,57 @@
 
 ---
 
+## [v0.3.6] — 2026-09-24
+
+**修复用户反馈的 3 个真 bug**（其中 2 个会导致页面完全打不开）。
+
+### 修复
+1. **「设置 → DSH 运行环境」打不开**
+   ```
+   无法从文本"InstallNode_Click"创建"Click"
+   → 无法绑定到目标方法，因其签名…与委托类型的签名…不兼容
+   ```
+   根因：我写的处理函数签名是 `(sender As Object, e As EventArgs)`，但 PCL 的
+   `MyButton` / `MyIconButton` / `MyListItem` 的 `Click` 委托是 **`MouseButtonEventArgs`**。
+   VB 的 XAML 事件绑定是**运行时**解析的，所以编译期毫无报错，一构造页面就抛 `XamlParseException`。
+   同类问题还藏在 `PageDshManager`（那里我误写成了 `MouseEventArgs`），一并修正——共 10 个处理函数。
+
+2. **点「版本设置」崩溃：`ArgumentOutOfRangeException: index`**
+   ```
+   在 PCL.FormMain.PageChange 行号 1370
+   在 PCL.PageLaunchLeft.BtnMore_Click 行号 839
+   ```
+   根因：`PageChange` 里有一句 `CType(PanTitleSelect.Children(Stack), MyRadioButton)`，
+   **直接把顶级页枚举值当作顶部导航按钮的下标**。而顶部导航只有 5 个按钮（Tag 0~4），
+   我把「整合包管理」做成了 `PageType.DshManager = 10` 的顶级页 → 必然越界。
+   （原有 5~9 的"副页面"进入时走的是 `PageNameGet(Stack) <> ""` 另一条分支，所以不碰这句。）
+   修法：把「整合包管理」改成挂在设置页下的子页面
+   `PageChange(PageType.Setup, PageSubType.SetupManager)`，并在设置页左列表放一个
+   `Visibility="Collapsed"` 的占位条目占住下标 5（`PageChange` 是按 `SubType` 下标取控件的）。
+
+3. **npm 安装互相打架：`ENOTEMPTY: directory not empty, rmdir .../domino/test`**
+   根因：你在首次启动引导里点了「安装推荐版本」，又在下载页点了「安装并绑定」——
+   **两个 npm 进程同时往同一个暂存目录写**，互相删对方的文件。
+   叠加第二个问题：取消安装时只 `Kill()` 掉了 `cmd.exe`，**npm 的 node.exe 子进程还在后台跑**，
+   于是残留进程继续写、下一次安装撞上非空目录。
+   修法：① 安装加全局互斥，第二个请求直接提示"已经有一个 dsh 版本正在安装中"；
+   ② 每次安装用独一无二的暂存目录，并在开始前清理遗留暂存目录（带重试）；
+   ③ 取消时用 `taskkill /PID x /T /F` **连整棵进程树一起结束**。
+
+### 变更
+- `ModBase.vb`：版本号 `0.3.5` → `0.3.6`。
+- `DEVNOTES.md`：新增 3 条（#35 顶级页枚举会被当下标用、#36 子页面要在左列表占位、
+  #37 Click 委托必须是 MouseButtonEventArgs），这三条都是"编译通过但一跑就崩"的坑。
+
+### 静态复核证据
+- 枚举审计：`Launch..Other = 0..4`（可作顶级页），`InstanceSelect..DshManager = 5..10`（均为副页面）。
+- 全仓库已无 `PageChange(PageType.DshManager)` 残留。
+- `SetupManager` 链路 5 处齐全：枚举定义 / FormMain 路由 / PageSetupLeft 的 PageGet 与 PageChange /
+  左栏占位项 / 启动页入口。
+- 设置页左列表下标连续：`0 ItemLaunch · 1 ItemLink · 2 ItemUI · 3 ItemSystem · 4 ItemDsh · 5 ItemManager`。
+
+---
+
 ## [v0.3.5] — 2026-09-24
 
 **修复用户反馈的两个 UI 问题**（都已在真实界面中复核通过）。

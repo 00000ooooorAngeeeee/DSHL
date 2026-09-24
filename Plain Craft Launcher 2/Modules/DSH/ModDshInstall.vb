@@ -151,6 +151,30 @@ Public Module ModDshInstall
     ''' </summary>
     Public Sub DshInstallVersion(Loader As LoaderBase, Version As String)
         If String.IsNullOrWhiteSpace(Version) Then Throw New Exception("未指定要安装的 dsh 版本")
+        '防并发（实机踩坑）：npm 装 dsh 会拉 500+ 个包。如果同时跑两个 npm 进程
+        '（比如引导里点了一次、下载页又点一次），它们会在同一个暂存目录里互相删文件，
+        '报出 `ENOTEMPTY: directory not empty, rmdir .../domino/test` 这种莫名其妙的错。
+        '这里用一个模块级标志串行化，第二个请求直接告知用户等待即可。
+        SyncLock DshInstallSlot
+            If DshInstallRunning Then
+                Throw New Exception("已经有一个 dsh 版本正在安装中，请等它完成后再试。" & vbCrLf &
+                                    "（npm 需要下载 500 多个包，通常要 1~2 分钟）")
+            End If
+            DshInstallRunning = True
+        End SyncLock
+        Try
+            DshInstallVersionCore(Loader, Version)
+        Finally
+            SyncLock DshInstallSlot
+                DshInstallRunning = False
+            End SyncLock
+        End Try
+    End Sub
+
+    Private ReadOnly DshInstallSlot As New Object
+    Private DshInstallRunning As Boolean = False
+
+    Private Sub DshInstallVersionCore(Loader As LoaderBase, Version As String)
         Dim NodeExe As String = DshNodeExe
         If NodeExe Is Nothing Then Throw New Exception("尚未配置 Node.js 运行环境，请先在设置中安装或指定 node.exe")
         Dim NpmCmd As String = DshNpmCmd
@@ -162,12 +186,11 @@ Public Module ModDshInstall
             Return
         End If
 
-        '1. 准备临时安装目录
-        Dim Stage As String = DshCacheRoot & "install-" & Version & "\"
-        Try
-            If DirectoryUtils.Exists(Stage) Then DirectoryUtils.Delete(Stage)
-        Catch
-        End Try
+        '0. 清掉上次失败/取消留下的暂存目录（npm 可能留下被占用的文件，重试几次）
+        DshCleanStaleStages(Version)
+
+        '1. 准备临时安装目录（每次都换一个全新目录，避免与残留状态打架）
+        Dim Stage As String = DshCacheRoot & "install-" & Version & "-" & GetTimeMs() & "\"
         DirectoryUtils.Create(Stage)
         FileUtils.Write(Stage & "package.json",
             "{""name"":""dsh-stage"",""private"":true,""version"":""1.0.0""}",
@@ -259,10 +282,10 @@ Public Module ModDshInstall
         '等待，同时响应取消
         While Not Proc.HasExited
             If Loader.State = LoadState.Canceled Then
-                Try
-                    Proc.Kill()
-                Catch
-                End Try
+                '必须连整棵进程树一起杀：npm.cmd 只是 cmd.exe 的外壳，
+                '真正干活的是 node.exe 子进程。只杀 cmd.exe 会留下一个还在写文件的 npm，
+                '下次安装就会撞上 `ENOTEMPTY: directory not empty` 之类的错（实机踩过）。
+                DshKillProcessTree(Proc)
                 Throw New Exception("安装已被用户取消")
             End If
             Thread.Sleep(120)
@@ -277,6 +300,67 @@ Public Module ModDshInstall
             End SyncLock
             Throw New Exception($"npm 安装失败（退出码 {Proc.ExitCode}）：{vbCrLf}{Tail}")
         End If
+    End Sub
+
+    ''' <summary>
+    ''' 结束整棵进程树（先 taskkill /T /F，失败再退回 Process.Kill）。
+    ''' npm.cmd → cmd.exe → node.exe 这条链必须整体结束。
+    ''' </summary>
+    Private Sub DshKillProcessTree(Proc As Process)
+        If Proc Is Nothing Then Return
+        Try
+            If Proc.HasExited Then Return
+        Catch
+            Return
+        End Try
+        Try
+            Dim Killer As New ProcessStartInfo With {
+                .FileName = "taskkill.exe",
+                .Arguments = $"/PID {Proc.Id} /T /F",
+                .UseShellExecute = False,
+                .CreateNoWindow = True,
+                .RedirectStandardOutput = True,
+                .RedirectStandardError = True
+            }
+            Dim K As Process = StartProcess(Killer)
+            K.StandardOutput.ReadToEnd()
+            K.StandardError.ReadToEnd()
+            K.WaitForExit(8000)
+            Logger.Info($"已结束安装进程树（PID {Proc.Id}）")
+        Catch ex As Exception
+            Logger.Warn(ex, "taskkill 结束进程树失败，回退到 Kill")
+            Try
+                Proc.Kill()
+            Catch
+            End Try
+        End Try
+    End Sub
+
+    ''' <summary>
+    ''' 清理某个版本遗留的暂存目录（上次失败或取消留下的）。
+    ''' npm 可能还有文件句柄没释放，所以重试几次并放宽等待。
+    ''' </summary>
+    Private Sub DshCleanStaleStages(Version As String)
+        Try
+            If Not DirectoryUtils.Exists(DshCacheRoot) Then Return
+            For Each Dir As String In DirectoryUtils.EnumerateDirectories(DshCacheRoot, searchPattern:="install-" & Version & "*")
+                For Attempt As Integer = 1 To 4
+                    Try
+                        DirectoryUtils.Delete(Dir)
+                        Logger.Info($"已清理遗留的安装暂存目录：{Dir}")
+                        Exit For
+                    Catch ex As Exception
+                        If Attempt = 4 Then
+                            Logger.Warn(ex, $"清理暂存目录失败（已放弃）：{Dir}")
+                        Else
+                            Thread.Sleep(600)
+                        End If
+                    End Try
+                Next
+            Next
+        Catch ex As Exception
+            Logger.Warn(ex, "扫描遗留暂存目录失败")
+        End Try
     End Sub
 
     ''' <summary>

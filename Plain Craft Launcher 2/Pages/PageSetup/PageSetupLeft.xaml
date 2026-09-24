@@ -44,5 +44,12 @@
                 </x:Array>
             </local:MyListItem.Buttons>
         </local:MyListItem>
+        <!--
+            整合包管理：不在设置左栏里显示（保持 Collapsed），
+            它的唯一作用是占住下标 5，好让 PageChange 里的
+            CType(FrmSetupLeft.PanItem.Children(SubType), MyListItem) 不会越界。
+            进入方式：启动页的「版本设置」按钮。
+        -->
+        <local:MyListItem x:Name="ItemManager" Visibility="Collapsed" IsScaleAnimationEnabled="False" Tag="5" MinPaddingRight="35" Height="36" VerticalAlignment="Top" Title="整合包管理" Type="RadioBox" />
     </StackPanel>
 </local:MyPageLeft>

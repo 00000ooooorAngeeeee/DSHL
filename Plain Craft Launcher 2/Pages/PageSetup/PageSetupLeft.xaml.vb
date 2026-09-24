@@ -85,6 +85,10 @@ Public Class PageSetupLeft
             Case FormMain.PageSubType.SetupDsh
                 If FrmSetupDsh Is Nothing Then FrmSetupDsh = New PageSetupDsh
                 Return FrmSetupDsh
+            Case FormMain.PageSubType.SetupManager
+                '整合包管理：左栏对应的条目是隐藏的占位项（下标 5），由启动页「版本设置」进入
+                If FrmDshManager Is Nothing Then FrmDshManager = New PageDshManager
+                Return FrmDshManager
             Case Else
                 Throw New Exception("未知的设置子页面种类：" & ID)
         End Select
@@ -115,6 +119,9 @@ Public Class PageSetupLeft
                 Case FormMain.PageSubType.SetupDsh
                     If IsNothing(FrmSetupDsh) Then FrmSetupDsh = New PageSetupDsh
                     PageChangeRun(FrmSetupDsh)
+                Case FormMain.PageSubType.SetupManager
+                    If IsNothing(FrmDshManager) Then FrmDshManager = New PageDshManager
+                    PageChangeRun(FrmDshManager)
                 Case Else
                     Throw New Exception("未知的设置子页面种类：" & ID)
             End Select

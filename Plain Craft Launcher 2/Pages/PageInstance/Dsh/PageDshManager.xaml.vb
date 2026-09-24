@@ -198,6 +198,10 @@ Public Class PageDshManager
 
 #Region "事件"
 
+    '约定（实机踩坑）：PCL 的 MyButton / MyIconButton / MyListItem 的 Click 委托都是 MouseButtonEventArgs，
+    '不是 EventArgs 也不是 MouseEventArgs。写错会在页面构造时抛 XamlParseException
+    '（"无法从文本 X 创建 Click"），表现为整个页面打不开。
+    '对照：MyListItem.Changed 是 RouteEventArgs；MyComboBox 用标准 SelectionChangedEventArgs。
     Private Sub ComboInstance_SelectionChanged(sender As Object, e As SelectionChangedEventArgs)
         If IsRefreshing Then Return
         Dim Item As MyComboBoxItem = TryCast(ComboInstance.SelectedItem, MyComboBoxItem)
@@ -239,7 +243,7 @@ Public Class PageDshManager
         End Try
     End Sub
 
-    Private Sub New_Click(sender As Object, e As MouseEventArgs)
+    Private Sub New_Click(sender As Object, e As MouseButtonEventArgs)
         DshNewInstanceWizard()
         DshInstanceListLoader.WaitForExit()
         If Instance IsNot Nothing Then
@@ -249,7 +253,7 @@ Public Class PageDshManager
         Reload()
     End Sub
 
-    Private Sub Delete_Click(sender As Object, e As MouseEventArgs)
+    Private Sub Delete_Click(sender As Object, e As MouseButtonEventArgs)
         If Instance Is Nothing Then Return
         If MyMsgBox($"确定要删除整合包「{Instance.Name}」吗？" & vbCrLf & vbCrLf &
                     "它的 DSH_HOME（技能、插件、配置、会话）与工作区都会一并删除，且会移到回收站。" & vbCrLf &
@@ -267,7 +271,7 @@ Public Class PageDshManager
         End Try
     End Sub
 
-    Private Sub OpenFolder_Click(sender As Object, e As MouseEventArgs)
+    Private Sub OpenFolder_Click(sender As Object, e As MouseButtonEventArgs)
         If Instance Is Nothing Then Return
         Try
             DirectoryUtils.Create(Instance.PathInstance)
@@ -277,7 +281,7 @@ Public Class PageDshManager
         End Try
     End Sub
 
-    Private Sub Launch_Click(sender As Object, e As MouseEventArgs)
+    Private Sub Launch_Click(sender As Object, e As MouseButtonEventArgs)
         If Instance Is Nothing Then Return
         If Not DshNodeReady() Then
             If MyMsgBox("还没有配置 Node.js 运行环境，是否现在去设置里下载？", "需要 Node.js", "去看看", "取消") = 1 Then
@@ -299,12 +303,12 @@ Public Class PageDshManager
         End Sub)
     End Sub
 
-    Private Sub Stop_Click(sender As Object, e As MouseEventArgs)
+    Private Sub Stop_Click(sender As Object, e As MouseButtonEventArgs)
         DshStop()
         Reload()
     End Sub
 
-    Private Sub PluginAdd_Click(sender As Object, e As MouseEventArgs)
+    Private Sub PluginAdd_Click(sender As Object, e As MouseButtonEventArgs)
         If Instance Is Nothing Then Return
         Dim Name As String = MyMsgBoxInput("安装插件", "输入 npm 包名（例如 @deepseek-ai/dsh-plugin-demo）。" & vbCrLf &
                                            "会通过 dsh plugin 装到这个整合包的 profile 里，需要联网。", "",
@@ -326,7 +330,7 @@ Public Class PageDshManager
         End Sub)
     End Sub
 
-    Private Sub SkillOpen_Click(sender As Object, e As MouseEventArgs)
+    Private Sub SkillOpen_Click(sender As Object, e As MouseButtonEventArgs)
         If Instance Is Nothing Then Return
         Try
             DirectoryUtils.Create(DshSkillRoot(Instance))

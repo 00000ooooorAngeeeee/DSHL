@@ -1214,7 +1214,10 @@ Public Class FormMain
         ''' </summary>
         HelpDetail = 9
         ''' <summary>
-        ''' 整合包管理（插件/技能/设置）。DSH 魔改新增，是一个顶级页面。
+        ''' 整合包管理。（DSH 魔改新增）
+        ''' 注意：它必须通过 PageChange(PageType.Setup, PageSubType.SetupManager) 进入——
+        ''' 直接 PageChange(PageType.DshManager) 会被当作顶级页面，
+        ''' 进而把 10 当成 PanTitleSelect.Children 的下标而越界崩溃（实机踩过）。
         ''' </summary>
         DshManager = 10
     End Enum
@@ -1242,6 +1245,12 @@ Public Class FormMain
         ''' DSH 运行环境设置（DSH 魔改新增，下标 4，必须与 PageSetupLeft 的 StackPanel 下标一致）。
         ''' </summary>
         SetupDsh = 4
+        ''' <summary>
+        ''' 整合包管理（DSH 魔改新增，下标 5，必须与 PageSetupLeft 的 StackPanel 下标一致）。
+        ''' 它挂在设置页下而不是做顶级页面：顶级页面的数值会被当作 PanTitleSelect.Children 的下标，
+        ''' 而顶部导航只有 5 个按钮（下标 0~4），超出就会抛 ArgumentOutOfRangeException（实机踩过）。
+        ''' </summary>
+        SetupManager = 5
         LinkMain = 0
         OtherHelp = 0
         OtherAbout = 1
@@ -1376,6 +1385,10 @@ Public Class FormMain
                 Case PageType.Setup
                     If FrmSetupLeft Is Nothing Then FrmSetupLeft = New PageSetupLeft
                     CType(FrmSetupLeft.PanItem.Children(SubType), MyListItem).SetChecked(True, True, Stack = PageCurrent)
+                    '整合包管理挂在设置页下，但左列表里没有对应条目，所以这里额外把设置页的右面板换掉
+                    If SubType = PageSubType.SetupManager Then
+                        If FrmDshManager Is Nothing Then FrmDshManager = New PageDshManager
+                    End If
                 Case PageType.Other
                     If FrmOtherLeft Is Nothing Then FrmOtherLeft = New PageOtherLeft
                     CType(FrmOtherLeft.PanItem.Children(SubType), MyListItem).SetChecked(True, True, Stack = PageCurrent)
@@ -1494,9 +1507,9 @@ Public Class FormMain
                     PageChangeAnim(New MyPageLeft, FrmDownloadResourceDetail)
                 Case PageType.HelpDetail '帮助详情
                     PageChangeAnim(New MyPageLeft, Stack.Additional(1))
-                Case PageType.DshManager '整合包管理（DSH 魔改新增）
+                Case PageType.DshManager '整合包管理（DSH 魔改新增，实际由 Setup 页的子页面路由到这里）
                     If FrmDshManager Is Nothing Then FrmDshManager = New PageDshManager
-                    PageChangeAnim(New MyPageLeft, FrmDshManager)
+                    PageChangeAnim(FrmSetupLeft, FrmDshManager)
             End Select
 #End Region
 
