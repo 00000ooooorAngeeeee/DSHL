@@ -13,20 +13,21 @@
                         <TextBlock Text="每个整合包拥有独立的 dsh 版本、插件、技能与配置（DSH_HOME），互不影响。"
                                    TextWrapping="Wrap" Opacity="0.7" FontSize="12" Margin="0,0,0,10" />
                         <local:MyComboBox x:Name="ComboInstance" SelectionChanged="ComboInstance_SelectionChanged" />
-                        <Grid Height="35" Margin="0,14,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" SharedSizeGroup="Button" />
-                                <ColumnDefinition Width="Auto" SharedSizeGroup="Button" />
-                                <ColumnDefinition Width="Auto" SharedSizeGroup="Button" />
-                                <ColumnDefinition Width="Auto" SharedSizeGroup="Button" />
-                                <ColumnDefinition Width="Auto" SharedSizeGroup="Button" />
-                            </Grid.ColumnDefinitions>
-                            <local:MyButton Grid.Column="0" x:Name="BtnNew" MinWidth="120" Text="新建整合包" Padding="13,0" Margin="0,0,14,0" Click="New_Click" />
-                            <local:MyButton Grid.Column="1" x:Name="BtnDelete" MinWidth="120" Text="删除整合包" Padding="13,0" Margin="0,0,14,0" Click="Delete_Click" />
-                            <local:MyButton Grid.Column="2" x:Name="BtnOpenFolder" MinWidth="120" Text="打开目录" Padding="13,0" Margin="0,0,14,0" Click="OpenFolder_Click" />
-                            <local:MyButton Grid.Column="3" x:Name="BtnLaunch" MinWidth="150" Text="启动 DeepSeekHarness" Padding="13,0" Margin="0,0,14,0" ColorType="Highlight" Click="Launch_Click" />
-                            <local:MyButton Grid.Column="4" x:Name="BtnStop" MinWidth="120" Text="关闭 DSH" Padding="13,0" Click="Stop_Click" />
-                        </Grid>
+                        <!--
+                            按钮行：原来固定 5 列 Grid，窗口一窄右边的「启动 DeepSeekHarness / 关闭 DSH」
+                            就被裁掉（用户反馈）。改用自适应面板：
+                              · 一行放得下 → 平分整行宽度、互相撑满（与卡片其他控件对齐）
+                              · 放不下     → 自动换行，保证每个按钮都完整可见可点
+                            与 Grid 方案相比还顺带去掉了 SharedSizeGroup——它会让 5 个按钮同一宽度，
+                            而「启动 DeepSeekHarness」文字更长，本来就更宽更合适。
+                        -->
+                        <local:MyWrapStretchPanel x:Name="PanButtons" Margin="0,14,0,0" RowSpacing="10">
+                            <local:MyButton x:Name="BtnNew" MinWidth="120" Height="35" Text="新建整合包" Padding="13,0" Margin="0,0,14,0" Click="New_Click" />
+                            <local:MyButton x:Name="BtnDelete" MinWidth="120" Height="35" Text="删除整合包" Padding="13,0" Margin="0,0,14,0" Click="Delete_Click" />
+                            <local:MyButton x:Name="BtnOpenFolder" MinWidth="120" Height="35" Text="打开目录" Padding="13,0" Margin="0,0,14,0" Click="OpenFolder_Click" />
+                            <local:MyButton x:Name="BtnLaunch" MinWidth="150" Height="35" Text="启动 DeepSeekHarness" Padding="13,0" Margin="0,0,14,0" ColorType="Highlight" Click="Launch_Click" />
+                            <local:MyButton x:Name="BtnStop" MinWidth="120" Height="35" Text="关闭 DSH" Padding="13,0" Click="Stop_Click" />
+                        </local:MyWrapStretchPanel>
                         <TextBlock x:Name="LabInstanceInfo" Text="" TextWrapping="Wrap" FontSize="12" Opacity="0.65" Margin="0,12,0,0" />
                     </StackPanel>
                 </Grid>

@@ -28,6 +28,21 @@ Public Class PageDshManager
         Reload()
     End Sub
 
+    ''' <summary>
+    ''' 记录按钮行的排布结果（诊断用）。
+    ''' 用户反馈过"窗口窄时「整合包」卡片的按钮被裁切"，改成 MyWrapStretchPanel 后
+    ''' 靠肉眼看截图验证并不可靠 —— 实测发现 PCL 在又窄又高的窗口下整个页面都不渲染内容（截图是空白），
+    ''' 所以让面板把自己的排布结果吐到日志里，这样任何窗口尺寸下都能客观确认
+    ''' "每行放了几个按钮、有没有超出可用宽度"。
+    ''' </summary>
+    Private Sub PanButtons_SizeChanged(sender As Object, e As SizeChangedEventArgs) Handles PanButtons.SizeChanged
+        Try
+            Logger.Info($"整合包按钮行排布：宽 {Math.Round(e.NewSize.Width)} 实际 {Math.Round(PanButtons.ActualWidth)}，" &
+                        $"{If(PanButtons.LastLayoutText, "（无）")}（{If(PanButtons.LastLayoutText IsNot Nothing AndAlso PanButtons.LastLayoutText.Contains("1 行"), "未换行", "已换行")}）")
+        Catch
+        End Try
+    End Sub
+
     ''' <summary>从外部打开某个整合包的管理页。</summary>
     Public Sub LoadInstance(Target As DshInstance)
         Instance = Target
