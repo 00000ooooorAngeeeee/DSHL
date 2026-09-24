@@ -109,26 +109,30 @@ Public Module ModDshBase
     End Function
 
     ''' <summary>
-    ''' DSH 模式下的界面隐藏默认值（启动时调用一次）。
+    ''' DSH 模式下的界面隐藏默认值（启动时调用一次），即"最终设置页"要固定下来的形态：
+    '''   · 设置 － 子页面：隐藏「启动」「个性化」「其他」（全是 Minecraft 设置）
+    '''   · 主页面：隐藏「更多」（帮助 / 关于 / 百宝箱 / 反馈 / 投票，对 DSH 无意义）
+    '''   · **保留**「联机」子页面开关为 False（顶部导航本来就有一处硬编码把它 Collapsed）、
+    '''     **保留**主页面的「启动 / 下载 / 设置」为可见（下载页要用来装 dsh，见 DEVNOTES #54）
+    ''' 这是用户明确要求的固定结果（他先在「功能隐藏」页手动勾选，再让我固化下来）。
     '''
     ''' 为什么必须走 PCL 的设置项、而不是自己设 Visibility（实机踩坑）：
-    ''' `PageSetupUI.HiddenRefresh()`（`Handles Me.Loaded`）会**重新设置**设置页左栏那几个条目的显隐：
+    ''' `PageSetupUI.HiddenRefresh()`（`Handles Me.Loaded`）会**重新设置**这些条目的显隐：
     '''     FrmSetupLeft.ItemLaunch.Visibility = If(... UiHiddenSetupLaunch ..., Collapsed, Visible)
-    ''' 所以我在 PageSetupLeft.Loaded 里设的 Collapsed 会被它覆盖掉。
-    ''' 改用 PCL 自己的开关最稳，而且这些设置项本来就已注册（Settings.vb 行 160~170）。
-    '''
-    ''' 隐藏内容：设置页的「启动 / 联机 / 个性化 / 其他」（全是 Minecraft 设置）＋ 顶部导航的「更多」。
-    ''' **不隐藏顶部导航的「下载」**：dsh 版本要从那里装（见 DEVNOTES #54 的教训）。
+    ''' 所以自己设的 Visibility 会被它覆盖。改用 PCL 自己的开关最稳，
+    ''' 而且这些键本来就已注册（Settings.vb 行 160~173）。
     ''' </summary>
     Public Sub DshApplyModeHideSettings()
         Try
             If Not DshModeEnabledForStartup() Then Return
-            DshSetSetting("UiHiddenSetupLaunch", True)
-            DshSetSetting("UiHiddenSetupLink", True)
-            DshSetSetting("UiHiddenSetupUi", True)
-            DshSetSetting("UiHiddenSetupSystem", True)
-            DshSetSetting("UiHiddenPageOther", True)
-            Logger.Info("DSH 模式：已把设置页的 MC 子页面与顶部「更多」页标记为隐藏")
+            DshSetSetting("UiHiddenSetupLaunch", True)  '设置子页面：启动
+            DshSetSetting("UiHiddenSetupUi", True)      '设置子页面：个性化
+            DshSetSetting("UiHiddenSetupSystem", True)  '设置子页面：其他
+            DshSetSetting("UiHiddenSetupLink", False)   '设置子页面：联机（保持原样）
+            DshSetSetting("UiHiddenPageOther", True)    '主页面：更多
+            DshSetSetting("UiHiddenPageDownload", False) '主页面：下载（要用来装 dsh，不能藏）
+            DshSetSetting("UiHiddenPageSetup", False)    '主页面：设置
+            Logger.Info("DSH 模式：已固定界面隐藏设置（设置页只留 DSH 运行环境；顶部隐藏「更多」）")
         Catch ex As Exception
             Logger.Warn(ex, "应用 DSH 模式的界面隐藏默认值失败")
         End Try

@@ -408,7 +408,9 @@ E:\DeepseekHarnessWP\
     ② **必须在 `InitializeComponent()` 之前**：`InitializeComponent` 会把「个性化 → 功能隐藏」里那些
        复选框（`local:SettingService.Key="UiHiddenSetupUi"` 等）建出来，绑定初始化时会拿内存里的旧值
        把设置项回写。实测把写入放在 `InitializeComponent()` 之后，5 个开关里只有 2 个保住了 True，
-       被回写的 `UiHiddenSetupUi` 就一直是 False → 设置页的「个性化」条目又冒出来。
+       被回写的开关就会一直是 False。**注意**：v0.4.1 时我误判成"PCL 稳定地把 UiHiddenSetupUi 回写成 False"，
+    实际上那是**用户正在「功能隐藏」页手动勾选**造成的（我在同一时间读到了中间状态）。
+    修正到 `InitializeComponent()` 之前后，5 个开关全部按预期落盘（v0.4.2 实机确认）。
        现在放在 `InitializeComponent()` 之前（`FormMain` 构造函数里，主题刷新之后）。
 
 57. **「正版 / 离线」这排按钮不在 `PanLogin` 里，而在 `PanType` 网格里**（`PageLaunchLeft.xaml` 行 30~57）。
@@ -418,6 +420,19 @@ E:\DeepseekHarnessWP\
 
 58. **XAML 里写换行要写 `&#10;`，写成 `&#38;#10;` 会变成字面量**（双重转义）。
     实机表现是界面上直接显示「&#10;」这串字符。
+
+59. **用户手动配置过的隐藏开关要"固定"下来，别用自己的默认值覆盖**：
+    需求原话是"我希望最终的设置页长这样（我用了 PCL 原版的「功能隐藏」功能），请你固定一下这个结果"。
+    做法：把用户勾选的那几个键在 `DshApplyModeHideSettings()` 里显式写成 True，
+    同时把**没勾**的键显式写成 False（避免旧配置残留导致行为不确定）。
+    当前固定值：`UiHiddenSetupLaunch/Ui/System = True`、`UiHiddenSetupLink = False`、
+    `UiHiddenPageOther = True`、`UiHiddenPageDownload/PageSetup = False`。
+
+60. **排查"设置被改"类问题时，先确认不是用户正在改**（本次的教训）：
+    v0.4.1 我看到 `Setup.ini` 里 `UiHiddenSetupUi` 是 False 就判定"PCL 会回写这个键"，
+    其实用户当时正在「功能隐藏」页里手动勾选——我读到的是中间状态。
+    **同一份配置文件被两个人同时动时，别急着下根因结论**；
+    正确做法是先问一句，或者观察多次启动是否稳定复现。
 
 ---
 

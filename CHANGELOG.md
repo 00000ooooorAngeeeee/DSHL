@@ -5,7 +5,42 @@
 
 ---
 
-## [v0.4.1] — 2026-09-24
+## [v0.4.2] — 2026-09-24
+
+### 变更：把「功能隐藏」的结果固定下来（用户要求）
+用户在 PCL 原版的「功能隐藏」页手动勾选出了想要的形态，要求固化。现在启动时由
+`DshApplyModeHideSettings()` 显式写入下列开关，并且**固定成这个结果**：
+
+| 开关 | 值 | 效果 |
+|---|---|---|
+| `UiHiddenSetupLaunch` | True | 设置页隐藏「启动」（全是 MC 启动设置） |
+| `UiHiddenSetupUi` | True | 设置页隐藏「个性化」 |
+| `UiHiddenSetupSystem` | True | 设置页隐藏「其他」 |
+| `UiHiddenSetupLink` | False | 保留（顶部导航本来就硬编码隐藏了「联机」） |
+| `UiHiddenPageOther` | True | 顶部导航隐藏「更多」 |
+| `UiHiddenPageDownload` | False | **必须保留可见**，dsh 版本要从这里装（DEVNOTES #54） |
+| `UiHiddenPageSetup` | False | 保留 |
+
+**实机确认结果**（截图 + UIA）：
+- 顶部导航：`启动 / 下载 / 设置`
+- 设置页左栏：只有 `DSH 运行环境`
+- 设置页右面板：运行环境状态 ＋ DSH 运行环境 ＋ 启动行为，**零 Minecraft 内容**
+- 落盘校验：启动后 `Setup.ini` 里 7 个开关全部为我固定的值，无异常
+
+### 更正 v0.4.1 里的一处误判
+v0.4.1 的 CHANGELOG 写了「设置页『个性化』条目偶发仍显现，原因是 PCL 会把 `UiHiddenSetupUi`
+回写成 False，尚未解决」。**这个判断是错的**——当时用户正在「功能隐藏」页手动勾选，
+我读到的是中间状态。修正 `DshApplyModeHideSettings()` 的调用时机（放在 `InitializeComponent()`
+之前）后，5 个开关全部按预期落盘，该问题不再存在。
+教训已记入 DEVNOTES #60：**同一份配置被两个人同时动时，别急着下根因结论**。
+
+### 变更
+- `ModBase.vb`：版本号 `0.4.1` → `0.4.2`。
+- `ModDshBase.vb`：`DshApplyModeHideSettings()` 改为显式固定 7 个开关（含显式写 False 的项）。
+- `DEVNOTES.md`：新增 2 条（#59 用户手动配过的开关要固定、#60 别急着判定"设置被改"），
+  并更正了 #56 里关于"被回写"的表述。
+
+---
 
 ### 变更：把下载页 / 设置页 / 启动页里的 Minecraft 内容全部隐藏（用户要求）
 | 页面 | 处理 |
