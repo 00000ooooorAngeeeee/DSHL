@@ -72,7 +72,7 @@
 
                     <TextBlock Grid.Row="6" VerticalAlignment="Top" HorizontalAlignment="Left" Text="说明" Margin="0,6,25,0" />
                     <TextBlock Grid.Row="6" Grid.Column="1" VerticalAlignment="Top" Margin="0,6,0,0" Opacity="0.6" TextWrapping="Wrap">
-                        每个整合包都有自己独立的 DSH_HOME（技能、插件、配置、会话）与独立的 dsh 版本，互不影响。&#38;#10;修改以上路径后需要重启启动器才能完全生效。
+                        每个整合包都有自己独立的 DSH_HOME（技能、插件、配置、会话）与独立的 dsh 版本，互不影响。&#10;修改以上路径后需要重启启动器才能完全生效。
                     </TextBlock>
                 </Grid>
             </local:MyCard>

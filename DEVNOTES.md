@@ -396,6 +396,29 @@ E:\DeepseekHarnessWP\
     入口反而更显眼。**顺带确认「任务管理」不受影响**——它的入口是右上角那个按钮
     （`BtnExtraDownload`，ToolTip 就是"任务管理"），不依赖「更多」页。
 
+55. **PCL 有现成的「功能隐藏」机制，隐藏页面要走它、不要自己设 Visibility**：
+    `PageSetupUI.HiddenRefresh()`（`Handles Me.Loaded`）会按这些开关**重新设置**一遍显隐：
+      `FrmSetupLeft.ItemLaunch.Visibility = If(... UiHiddenSetupLaunch ..., Collapsed, Visible)`
+    开关本身也已注册（`Settings.vb` 行 160~173，每个都带 `OnChanged:=AddressOf PageSetupUI.HiddenRefresh`）。
+    自己设 Visibility 会被它覆盖——除非把设置项真的设成 True。
+
+56. **写设置项有两个硬约束（都踩过）**：
+    ① **必须在 UI 线程**：`Settings.Set` 会碰控件绑定，后台线程调用抛
+       `InvalidOperationException：调用线程无法访问此对象，因为另一个线程拥有该对象`。
+    ② **必须在 `InitializeComponent()` 之前**：`InitializeComponent` 会把「个性化 → 功能隐藏」里那些
+       复选框（`local:SettingService.Key="UiHiddenSetupUi"` 等）建出来，绑定初始化时会拿内存里的旧值
+       把设置项回写。实测把写入放在 `InitializeComponent()` 之后，5 个开关里只有 2 个保住了 True，
+       被回写的 `UiHiddenSetupUi` 就一直是 False → 设置页的「个性化」条目又冒出来。
+       现在放在 `InitializeComponent()` 之前（`FormMain` 构造函数里，主题刷新之后）。
+
+57. **「正版 / 离线」这排按钮不在 `PanLogin` 里，而在 `PanType` 网格里**（`PageLaunchLeft.xaml` 行 30~57）。
+    `PanLogin` 只是登录**页面**的容器（`RefreshPage` 往里塞 `PageLoginLegacy` 之类的控件）。
+    想彻底隐藏账号相关 UI，两个都要 `Collapsed`。
+    另外 `BtnMore` 与 `BtnVersion` 在 DSH 模式下功能重复（都进整合包管理），只留 `BtnVersion`。
+
+58. **XAML 里写换行要写 `&#10;`，写成 `&#38;#10;` 会变成字面量**（双重转义）。
+    实机表现是界面上直接显示「&#10;」这串字符。
+
 ---
 
 ## 8b. 本地构建环境搭建记录（v0.3.0 完成）
@@ -456,6 +479,7 @@ E:\DeepseekHarnessWP\tools\dotnet\dotnet.exe msbuild "Plain Craft Launcher 2\Pla
 | v0.3.8 | 2026-09-24 | 安装任务接入 PCL 任务管理器（右下角下载按钮 ＋ 任务栏进度 ＋ 任务管理卡片），修掉“同一次安装跑两遍 worker”的隐蔽 bug | ✅ 已完成 |
 | v0.3.9 | 2026-09-24 | 任务卡片标题显示 dsh 版本号；加真实文件计数（已写入 N 个文件 / 共 M 个包）；查清速率为何测不到 | ✅ 已完成 |
 | v0.4.0 | 2026-09-24 | 隐藏顶部导航「更多」页；把「整合包管理」入口移到启动页的按钮上 | ✅ 已完成 |
+| v0.4.1 | 2026-09-24 | 隐藏下载页与设置页里全部 Minecraft 内容（含启动页账号 UI）；修 `&#10;` 字面量 | ✅ 已完成 |
 | v0.5.0 | — | 术语清理：启动页/关于页的 Minecraft 残留文案、账号与皮肤入口 | ⏳ 待做 |：启动页/关于页的 Minecraft 残留文案、账号与皮肤入口隐藏 | ⏳ 待做 |
 | v0.5.0 | — | 术语清理：启动页/关于页的 Minecraft 残留文案、账号与皮肤入口隐藏、联机页处理 | ☐ |
 | v0.6.0 | — | 引导完善：Node 下载进度提示、失败重试、镜像源切换；首次启动引导的视觉打磨 | ☐ |

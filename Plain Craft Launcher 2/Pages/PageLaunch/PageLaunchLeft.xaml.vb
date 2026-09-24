@@ -763,9 +763,17 @@ ExitRefresh:
         BtnVersion.IsEnabled = True
         '只要已经有整合包（状态 2 或 3），就允许进整合包管理页：
         '状态 2 时用户往往正需要进去改绑定的 dsh 版本、管理插件/技能，所以这里也要显示。
+        '(CurrentState 为 0/1 时下方也不会把它设成可见，所以这里不必额外判空。)
         If CurrentState >= 2 AndAlso CurrentState <= 3 Then BtnMore.Visibility = BtnVersion.Visibility
-        'DSH 模式下不需要账号界面
+        'DSH 模式下不需要账号界面：
+        ' · PanLogin 是登录页面的容器（RefreshPage 会把 PageLoginLegacy 之类的控件塞进它的 Children）；
+        ' · PanType 是「正版 / 离线」这排单选按钮所在的网格（它和 PanLogin 是两个不同的元素，别漏）。
+        '只设 IsHitTestVisible=False 的话文字仍然可见，所以直接 Collapsed（用户要求隐藏 MC 内容）。
         PanLogin.IsHitTestVisible = False
+        PanLogin.Visibility = Visibility.Collapsed
+        PanType.Visibility = Visibility.Collapsed
+        '底部只留一个入口：BtnMore 与 BtnVersion 在 DSH 模式下功能重复，隐藏 BtnMore
+        BtnMore.Visibility = Visibility.Collapsed
     End Sub
     Private DshBtnLastKey As String = ""
 

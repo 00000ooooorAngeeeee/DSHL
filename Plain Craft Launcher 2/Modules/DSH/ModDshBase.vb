@@ -109,6 +109,32 @@ Public Module ModDshBase
     End Function
 
     ''' <summary>
+    ''' DSH 模式下的界面隐藏默认值（启动时调用一次）。
+    '''
+    ''' 为什么必须走 PCL 的设置项、而不是自己设 Visibility（实机踩坑）：
+    ''' `PageSetupUI.HiddenRefresh()`（`Handles Me.Loaded`）会**重新设置**设置页左栏那几个条目的显隐：
+    '''     FrmSetupLeft.ItemLaunch.Visibility = If(... UiHiddenSetupLaunch ..., Collapsed, Visible)
+    ''' 所以我在 PageSetupLeft.Loaded 里设的 Collapsed 会被它覆盖掉。
+    ''' 改用 PCL 自己的开关最稳，而且这些设置项本来就已注册（Settings.vb 行 160~170）。
+    '''
+    ''' 隐藏内容：设置页的「启动 / 联机 / 个性化 / 其他」（全是 Minecraft 设置）＋ 顶部导航的「更多」。
+    ''' **不隐藏顶部导航的「下载」**：dsh 版本要从那里装（见 DEVNOTES #54 的教训）。
+    ''' </summary>
+    Public Sub DshApplyModeHideSettings()
+        Try
+            If Not DshModeEnabledForStartup() Then Return
+            DshSetSetting("UiHiddenSetupLaunch", True)
+            DshSetSetting("UiHiddenSetupLink", True)
+            DshSetSetting("UiHiddenSetupUi", True)
+            DshSetSetting("UiHiddenSetupSystem", True)
+            DshSetSetting("UiHiddenPageOther", True)
+            Logger.Info("DSH 模式：已把设置页的 MC 子页面与顶部「更多」页标记为隐藏")
+        Catch ex As Exception
+            Logger.Warn(ex, "应用 DSH 模式的界面隐藏默认值失败")
+        End Try
+    End Sub
+
+    ''' <summary>
     ''' 安全读取一个全局设置项。设置项不存在或读取异常时返回默认值，绝不抛出。
     ''' 用于在设置项尚未注册（例如旧版本配置文件）时仍能启动。
     ''' 重要（DEVNOTES §8.7）：不能用 Settings.Get 去"探测"设置项是否存在——

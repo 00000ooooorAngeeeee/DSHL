@@ -295,6 +295,16 @@ Public Class FormMain
         '注册拖拽事件（不能直接加 Handles，否则没用；#6340）
         [AddHandler](DragDrop.DragEnterEvent, New DragEventHandler(AddressOf HandleDrag), handledEventsToo:=True)
         [AddHandler](DragDrop.DragOverEvent, New DragEventHandler(AddressOf HandleDrag), handledEventsToo:=True)
+        'DSH 魔改：写入界面隐藏开关。
+        '★ 时机很关键，必须在这两件事**之前**：
+        '   1. InitializeComponent() —— 它会把「个性化 → 功能隐藏」里那些复选框建出来，
+        '      而复选框绑定了 UiHiddenSetupLaunch / UiHiddenSetupUi 等设置项，
+        '      绑定初始化时会拿**内存里的旧值（False）把设置项回写**，覆盖掉我设的 True
+        '      （实机踩过：Setup.ini 里只有 UiHiddenSystem / UiHiddenPageOther 留住了 True）；
+        '   2. PageSetupUI.HiddenRefresh() —— 它按这些开关设置设置页左栏的显隐。
+        '另外必须在 UI 线程：Settings.Set 会碰控件绑定，后台线程调用会抛
+        'InvalidOperationException"调用线程无法访问此对象"。
+        DshApplyModeHideSettings()
         '加载 UI
         InitializeComponent()
         Opacity = 0
@@ -435,26 +445,12 @@ Public Class FormMain
             If VersionBranchMain = "OpenSource" AndAlso Not DshModeEnabledForStartup() Then
                 MyMsgBox($"该版本中无法使用以下特性：{vbCrLf}- CurseForge API 调用：需要自行申请 API Key，然后添加到 ModSecret.vb 的开头{vbCrLf}- 正版登录：需要自行向微软申请 Client ID，然后添加到 ModSecret.vb 的开头{vbCrLf}- 更新与联网通知：避免滥用隐患{vbCrLf}- 主题切换：这是需要赞助解锁的纪念性质的功能，别让赞助者太伤心啦……{vbCrLf}- 百宝箱：开发早期往里面塞了些开发工具，整理起来太麻烦了……", "开源版本说明")
             End If
-            'DSH 魔改：隐藏顶部导航的「更多」页。
-            '原因（用户要求）：「更多」下面全是 Minecraft 相关的内容（帮助 / 关于 / 百宝箱 / 反馈 / 投票），
-            '对 DSH 启动器没有意义。
-            '实现方式很关键：只把 Visibility 设成 Collapsed，**绝对不要从 PanTitleSelect 里移除元素**——
-            'FormMain.PageChange 会拿顶级页枚举值当 PanTitleSelect.Children 的下标（见 DEVNOTES #35），
-            '移除元素会让下标整体错位、直接抛 ArgumentOutOfRangeException。
-            '「任务管理」不受影响：它的入口是右上角那个按钮（BtnExtraDownload，ToolTip 就是"任务管理"）。
-            If DshModeEnabledForStartup() Then
-                '必须 RunInUi：这段初始化跑在后台线程（RunInNewThread），
-                '而 BtnTitleSelect4 是 UI 线程创建的元素，后台线程直接改 Visibility 会抛
-                'InvalidOperationException"调用线程无法访问此对象，因为另一个线程拥有该对象"（实机踩过）。
-                RunInUi(Sub()
-                            Try
-                                BtnTitleSelect4.Visibility = Visibility.Collapsed
-                                Logger.Info("DSH 模式：已隐藏顶部导航的「更多」页")
-                            Catch ex As Exception
-                                Logger.Warn(ex, "隐藏「更多」页失败")
-                            End Try
-                        End Sub)
-            End If
+            'DSH 魔改：隐藏顶部导航的「更多」页 & 设置页里全部 Minecraft 子页面。
+            '做法是写 PCL 自己的隐藏开关（UiHiddenPageOther / UiHiddenSetup*），
+            '而不是自己设 Visibility ——因为 PageSetupUI.HiddenRefresh() 会按这些开关
+            '重新设置一遍显隐，自己设的会被覆盖掉（实机踩过）。
+            '这些开关同时会被「个性化 → 功能隐藏」页面读取，所以在那里也能看到一致的状态。
+            DshApplyModeHideSettings()
         End Sub, "初始化", ThreadPriority.Lowest)
 
         Logger.Info($"第三阶段加载用时：{GetTimeMs() - ApplicationStartTick} ms")
@@ -1259,6 +1255,10 @@ Public Class FormMain
         DownloadShader = 6
         ''' <summary>
         ''' DSH 版本下载（DSH 魔改新增，下标 8，必须与 PageDownloadLeft 的 StackPanel 下标一致）。
+        ''' 下标 8 = PanItem 的第 9 个子元素（原版游戏 / 社区资源标题 / Mod / 整合包 / 数据包 /
+        ''' 资源包 / 光影包 / 空占位 / DSH 版本）。**不要改这个值**：
+        ''' FormMain 与本页都按 Children 下标取控件（见 DEVNOTES #36）。
+        ''' DSH 模式下前 8 个子元素只是被设为 Collapsed，仍然留在集合里以保证下标稳定。
         ''' </summary>
         DownloadDsh = 8
         SetupLaunch = 0
@@ -1402,6 +1402,13 @@ Public Class FormMain
             IsChangingPage = True '防止下面的勾选直接触发了 PageChangeActual
             CType(PanTitleSelect.Children(Stack), MyRadioButton).SetChecked(True, True, PageNameGet(PageCurrent) = "")
             IsChangingPage = False
+            'DSH 魔改：进入设置页时，如果请求的子页面已经被隐藏（DSH 模式下「启动/个性化/其他/联机」
+            '全部隐藏），就改用它自己挑好的默认子页面。否则 PageChangeActual 会无条件把
+            '「启动」（全是 Minecraft 设置）显示出来 —— 用户反馈过这个。
+            If Stack.Page = PageType.Setup AndAlso SubType = PageSubType.Default Then
+                If FrmSetupLeft Is Nothing Then FrmSetupLeft = New PageSetupLeft
+                SubType = FrmSetupLeft.PageID
+            End If
             Select Case Stack.Page
                 Case PageType.Download
                     If FrmDownloadLeft Is Nothing Then FrmDownloadLeft = New PageDownloadLeft

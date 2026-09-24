@@ -5,12 +5,45 @@ Public Class PageDownloadLeft
 
     ''' <summary>
     ''' 当前页面的编号。
+    ''' 注意（DSH 魔改）：主页面枚举值会被 FormMain.PageChange 当作
+    ''' PanTitleSelect.Children 的下标用（顶部导航），而**子页面**枚举值会被当作
+    ''' 本页 PanItem.Children 的下标用。所以隐藏条目时**只能改 Visibility、
+    ''' 不能从 PanItem 里移除元素**，否则下标整体错位。
     ''' </summary>
-    Public PageID As FormMain.PageSubType = FormMain.PageSubType.DownloadInstall
+    Public PageID As FormMain.PageSubType = FormMain.PageSubType.DownloadDsh
 
     ''' <summary>
-    ''' 勾选事件改变页面。
+    ''' DSH 模式：隐藏所有 Minecraft 相关条目，只留「DSH 版本」。
+    '''
+    ''' 为什么保留元素而不删除：本类与 FormMain 都按 Children 下标取控件
+    ''' （CType(FrmDownloadLeft.PanItem.Children(SubType), MyListItem)），
+    ''' 删掉元素会让 DownloadMod=2 之类的下标全部错位，直接取到错的控件。
+    ''' 把「社区资源」这个分组标题的整行也一起隐藏（Visibility=Collapsed 只是不渲染，
+    ''' 不再占位，所以视觉上就是干净的一页）。
     ''' </summary>
+    Private Sub ApplyDshModeVisibility()
+        If Not PageLaunchLeft.DshModeEnabled() Then Return
+        For Each Child As Object In PanItem.Children
+            If TypeOf Child Is TextBlock Then
+                '「社区资源」分组标题（以及任何分组标题）
+                CType(Child, TextBlock).Visibility = Visibility.Collapsed
+            ElseIf TypeOf Child Is MyListItem Then
+                If Child Is ItemDsh Then
+                    Child.Visibility = Visibility.Visible
+                Else
+                    Child.Visibility = Visibility.Collapsed
+                End If
+            End If
+        Next
+        Logger.Info("DSH 模式：下载页只保留「DSH 版本」")
+    End Sub
+
+    ''' <summary>本控件加载后应用一次 DSH 模式的显隐。</summary>
+    Private Sub PageDownloadLeft_Loaded(sender As Object, e As RoutedEventArgs) Handles Me.Loaded
+        ApplyDshModeVisibility()
+    End Sub
+
+    ''' <summary>勾选事件改变页面。</summary>
     Private Sub PageCheck(sender As FrameworkElement, e As RouteEventArgs) Handles ItemInstall.Check, ItemMod.Check, ItemPack.Check, ItemResourcePack.Check, ItemShader.Check, ItemDataPack.Check, ItemDsh.Check
         '尚未初始化控件属性时，sender.Tag 为 Nothing，会导致切换到页面 0
         '若使用 IsLoaded，则会导致模拟点击不被执行（模拟点击切换页面时，控件的 IsLoaded 为 False）

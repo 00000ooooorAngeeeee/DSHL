@@ -5,7 +5,54 @@
 
 ---
 
-## [v0.4.0] — 2026-09-24
+## [v0.4.1] — 2026-09-24
+
+### 变更：把下载页 / 设置页 / 启动页里的 Minecraft 内容全部隐藏（用户要求）
+| 页面 | 处理 |
+|---|---|
+| 下载页 | 隐藏「原版游戏」与「社区资源」整组（Mod / 整合包 / 数据包 / 资源包 / 光影包），只留「DSH 版本」 |
+| 设置页 | 隐藏「启动 / 联机 / 个性化 / 其他」四个子页面（里面全是 MC 设置），只留「DSH 运行环境」；默认子页面也改成 DSH 运行环境 |
+| 启动页 | 隐藏账号区域（`PanLogin` 登录面板块 ＋ `PanType` 的「正版 / 离线」按钮）；`BtnMore` 与 `BtnVersion` 功能重复，只留后者 |
+
+**实现要点（不能直接删元素）**：`FormMain.PageChange` 里
+`CType(FrmDownloadLeft.PanItem.Children(SubType), MyListItem)` / `FrmSetupLeft...` 都是**按下标取控件**的，
+删掉元素会让 `DownloadDsh=8` / `SetupDsh=4` 全部错位并抛 `ArgumentOutOfRangeException`。
+所以一律用 `Visibility = Collapsed`（不渲染也不占位）。
+
+设置页那一组走 **PCL 自带的「功能隐藏」开关**（`UiHiddenSetup*` / `UiHiddenPageOther`），
+因为 `PageSetupUI.HiddenRefresh()` 会按这些开关重新设置一遍显隐、把自己设的 Visibility 覆盖掉。
+
+### 修复：`&#10;` 被当字面量显示
+「DSH 运行环境」页的说明文字里写成了 `&#38;#10;`（双重转义），界面上直接显示「&#10;」这串字符。
+改成 `&#10;`。
+
+### 踩坑记录（都写进 DEVNOTES 了）
+- **写设置项必须在 UI 线程**：后台线程调用 `Settings.Set` 会抛
+  `InvalidOperationException：调用线程无法访问此对象，因为另一个线程拥有该对象`。
+- **写设置项必须在 `InitializeComponent()` 之前**：`InitializeComponent` 会把「个性化 → 功能隐藏」里那些
+  复选框（`SettingService.Key="UiHiddenSetupUi"` 等）建出来，绑定初始化时会拿内存里的旧值**回写设置项**。
+  实测放在 `InitializeComponent()` 之后时，5 个开关里只有 2 个保住了 `True`。
+- **「正版 / 离线」不在 `PanLogin` 里**，而在 `PageType` 同级的 `PanType` 网格里，两个都要隐藏。
+
+### 变更
+- `ModBase.vb`：版本号 `0.4.0` → `0.4.1`。
+- `ModDshBase.vb`：新增 `DshApplyModeHideSettings()`。
+- `FormMain.xaml.vb`：构造函数里在 `InitializeComponent()` **之前**写隐藏开关；
+  `PageChange` 进入设置页且未指定子页面时，改用 `PageSetupLeft.PageID`（避免条件式地显示 MC 设置）。
+- `PageDownloadLeft.xaml.vb`：新增 `ApplyDshModeVisibility()`，默认子页面改为 `DownloadDsh`。
+- `PageSetupLeft.xaml.vb`：隐藏 MC 条目（含 `HiddenRefresh` 之后的兜底），默认子页面改为 `SetupDsh`。
+- `PageLaunchLeft.xaml.vb`：隐藏 `PanLogin` / `PanType` / `BtnMore`。
+- `PageSetupDsh.xaml`：修正 `&#38;#10;`。
+- `DEVNOTES.md`：新增 4 条（#55 隐藏页面要走 PCL 的开关、#56 写设置项的两个硬约束、
+  #57 正版离线按钮在 PanType 而不是 PanLogin、#58 XAML 换行要写 `&#10;`）。
+
+### ⚠️ 一处未完全解决的问题（如实记录）
+设置页左栏的「个性化」条目偶发仍会显现。原因是那个开关（`UiHiddenSetupUi`）被
+「功能隐藏」页的复选框回写成 `False`，而 `PageSetupUI.HiddenRefresh()` 据此把它设回可见。
+已用「在 InitializeComponent 之前写入」缓解（另外三个开关已稳定生效），但该键仍出现过被回写的情况，
+**下一次要继续查**。其余部分（下载页、顶部导航、启动页账号 UI、设置页默认子页面）均已实机确认。
+
+---
 
 ### 变更：隐藏顶部导航的「更多」页（用户要求）
 「更多」下面全是 Minecraft 相关的内容（帮助 / 关于 / 百宝箱 / 反馈 / 投票），对 DSH 启动器没有意义。
