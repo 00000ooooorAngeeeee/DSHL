@@ -191,6 +191,24 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </ApplicationDefinition>
+    <!-- ===== DSH 魔改新增：DSH 模块 ===== -->
+    <Compile Include="Modules\DSH\ModDshBase.vb" />
+    <Compile Include="Modules\DSH\ModDshHome.vb" />
+    <Compile Include="Modules\DSH\ModDshInstance.vb" />
+    <Compile Include="Modules\DSH\ModDshInstall.vb" />
+    <Compile Include="Modules\DSH\ModDshLaunch.vb" />
+    <Compile Include="Modules\DSH\ModDshNet.vb" />
+    <Compile Include="Modules\DSH\ModDshSetup.vb" />
+    <!-- ===== DSH 魔改新增：DSH 页面 ===== -->
+    <Compile Include="Pages\PageDownload\Dsh\PageDownloadDsh.xaml.vb">
+      <DependentUpon>PageDownloadDsh.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="Pages\PageSetup\PageSetupDsh.xaml.vb">
+      <DependentUpon>PageSetupDsh.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="Pages\PageInstance\Dsh\PageDshManager.xaml.vb">
+      <DependentUpon>PageDshManager.xaml</DependentUpon>
+    </Compile>
     <Compile Include="Controls\Behaviors\ClipboardInterceptor.vb" />
     <Compile Include="Controls\Behaviors\Interfaces.vb" />
     <Compile Include="Controls\Behaviors\LazyLoadBehavior.vb" />
@@ -394,6 +412,19 @@
       <DependentUpon>PageSpeedRight.xaml</DependentUpon>
     </Compile>
     <Page Include="Controls\MyExtraTextButton.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <!-- ===== DSH 魔改新增：DSH 页面 ===== -->
+    <Page Include="Pages\PageDownload\Dsh\PageDownloadDsh.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Pages\PageSetup\PageSetupDsh.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Pages\PageInstance\Dsh\PageDshManager.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>
@@ -950,4 +981,13 @@
 
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.VisualBasic.targets" />
+  <!--
+    本地构建环境补丁（DSH 魔改新增）：
+    官方 CI 用 Visual Studio 的 MSBuild，它会自动为 WPF 的 VB 工程引入 XAML 编译目标。
+    本机用的是 .NET SDK 自带的 MSBuild（没有装 VS），它不会自动引入，
+    导致 MarkupCompilePass1 不运行、生成的 .g.vb 缺失，出现 512 个“找不到事件 Loaded”之类的报错。
+    这里显式引入 SDK 自带的 WPF 目标来补齐。导入失败时静默跳过，不影响 VS 环境。
+  -->
+  <Import Project="$(MSBuildToolsPath)\Sdks\Microsoft.NET.Sdk.WindowsDesktop\targets\Microsoft.WinFX.targets"
+          Condition="Exists('$(MSBuildToolsPath)\Sdks\Microsoft.NET.Sdk.WindowsDesktop\targets\Microsoft.WinFX.targets')" />
 </Project>

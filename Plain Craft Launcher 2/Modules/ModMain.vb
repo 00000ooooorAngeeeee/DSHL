@@ -384,6 +384,8 @@ EndHint:
     Public FrmDownloadDataPack As PageDownloadDataPack
     Public FrmDownloadShader As PageDownloadShader
     Public FrmDownloadResourcePack As PageDownloadResourcePack
+    ''' <summary>DSH 版本下载页（DSH 魔改新增）。</summary>
+    Public FrmDownloadDsh As PageDownloadDsh
 
     '设置页面声明
     Public FrmSetupLeft As PageSetupLeft
@@ -391,6 +393,12 @@ EndHint:
     Public FrmSetupUI As PageSetupUI
     Public FrmSetupSystem As PageSetupSystem
     Public FrmSetupLink As PageSetupLink
+    ''' <summary>DSH 运行环境设置页（DSH 魔改新增）。</summary>
+    Public FrmSetupDsh As PageSetupDsh
+
+    'DSH 整合包管理页（DSH 魔改新增）
+    ''' <summary>整合包管理：整合包列表 / 插件 / 技能。</summary>
+    Public FrmDshManager As PageDshManager
 
     '其他页面声明
     Public FrmOtherLeft As PageOtherLeft

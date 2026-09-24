@@ -4,7 +4,7 @@
 > 记录**目标、约束、已核实的外部事实、避坑清单、进度**。
 > 改动前请先读 §7 的"工作流程"，并遵守 §8 的"注意事项"。
 
-最后更新：2026-09-24 ・ 启动器版本：`v0.1.0`
+最后更新：2026-09-24 ・ 启动器版本：`v0.3.0`
 
 ---
 
@@ -253,6 +253,58 @@ E:\DeepseekHarnessWP\
 11. `MeloongCore` 是子模块，**不要手改**，也不要把它加进本仓库的提交（用子模块引用即可）。
 12. 改 `AssemblyInfo.vb` 的版本号要同步 `ModBase.vb`，否则"关于"页显示与实际不符。
 13. 旧代码里 `Mc*` 命名一律保留（回退用），新增代码用 `Dsh*` 前缀，避免大范围重命名引入编译错误。
+14. **VB 的集合初始值设定项 `{ }` 内部不能写独占一行的注释**，只能写行尾注释。
+    否则解析器会在前一个元素的 `)` 处报 `BC30201 应为表达式`，后面的行全部连锁报 `BC30035 语法错误`，
+    报错位置还会指到完全无关的行（这一个坑花了两小时）。说明性注释请写在 `From {` 之前。
+15. **模块级变量名不要太像 BCL 类型**：`Public DshProcess As Process` 会让同模块内的 `Process` 解析成
+    `DshProcess`，于是 `Dim Proc As Process` 报 `BC30182 应为类型`。同理 `Date`、`Error`、`Name` 都是保留字，
+    不能做属性名。已把变量改名为 `DshCurrentProcess`。
+16. **VB 订阅事件不能用 `+=`**，必须 `AddHandler X.Event, handler`；`Process.OutputDataReceived` 尤其如此
+    （写成 `+=` 会报 `BC32022 ... 是事件，不能直接调用`）。
+17. **`LoaderBase` 没有 `IsCanceled`**（只有 `LoaderTask(Of TIn, TOut)` 有）。通用取消判定请用
+    `Loader.State = LoadState.Canceled`。
+18. **`Logger.Error` 不要写成 `ErrorMessage`**：批量正则替换 `\.Error` 时会误伤 `Logger.Error(`，
+    也会误伤 `Proc.ErrorDataReceived`。替换前务必先看命中清单。
+19. **类名 / 方法名冲突**：`DshProcess`（变量）与 `System.Diagnostics.Process` 冲突就是这类问题的典型，
+    新增类型与已有模块级标识符前先全局搜一下重名。
+20. **PCL 的 `Settings.Get` 会 `CTypeDynamic`**（见 §8.7），所以 DSH 侧另建了本地缓存 `DshSettingCache`，
+    未注册的键会安全回落到默认值，不会抛异常。
+
+---
+
+## 8b. 本地构建环境搭建记录（v0.3.0 完成）
+
+本机没有 Visual Studio，折腾了很久才打通编译。**以下是可复现的完整步骤**，换机器照做即可：
+
+```powershell
+# 1. 装便携版 .NET 9 SDK（Program Files 无写权限，所以装到工作区）
+#    下载：https://builds.dotnet.microsoft.com/dotnet/Sdk/9.0.101/dotnet-sdk-9.0.101-win-x64.zip
+#    解压到 E:\DeepseekHarnessWP\tools\dotnet
+#    （注意：网络限速约 150~340 KB/s，281 MB 需要 15~30 分钟，建议后台下载）
+
+# 2. 还原（会拉 Microsoft.NETFramework.ReferenceAssemblies 等包）
+E:\DeepseekHarnessWP\tools\dotnet\dotnet.exe restore "PCLCS\PCLCS.csproj"
+E:\DeepseekHarnessWP\tools\dotnet\dotnet.exe restore "Plain Craft Launcher 2\Plain Craft Launcher 2.vbproj"
+
+# 3. 编译
+E:\DeepseekHarnessWP\tools\dotnet\dotnet.exe msbuild "Plain Craft Launcher 2\Plain Craft Launcher 2.vbproj" -p:Configuration=Debug -v:m
+```
+
+产物：`Plain Craft Launcher 2\obj\Debug\Plain Craft Launcher 2.exe`（也会复制到 `bin\`）。
+
+**这套环境需要四个补丁**（都已写进仓库，前面踩的坑）：
+
+| 补丁 | 位置 | 解决什么 |
+|---|---|---|
+| NuGet 引用程序集包 | `Directory.Build.props` | `MSB3644` 找不到 net48 引用程序集 |
+| `VBRuntime` / `VBRuntimePath` | `Directory.Build.props` | `BC2017` 找不到 Microsoft.VisualBasic.dll |
+| `Microsoft.WinFX.targets` 导入 | vbproj 末尾 | 不生成 `.g.vb`，几百个「找不到事件 Loaded」 |
+| `Microsoft.VisualBasic` 显式 Reference | `Directory.Build.props` | XAML 编译器 `MC2000 Could not find assembly` |
+
+> 还有一个坑：`AssemblySearchPaths` 一旦在 `Directory.Build.props` 里覆盖，会破坏
+> `Newtonsoft.Json` 等 HintPath 引用（满屏 `JObject 未定义`），所以**不要动它**。
+> 另外所有属性都必须加 `'$(MSBuildProjectExtension)' == '.vbproj'` 条件，
+> 否则会把 .NET Framework 引用程序集泄漏给 netstandard2.0 的 C# 子项目（`CS0518 System.String 未定义`）。
 
 ---
 
@@ -261,10 +313,26 @@ E:\DeepseekHarnessWP\
 | 版本 | 日期 | 内容 | 状态 |
 |---|---|---|---|
 | v0.1.0 | 2026-09-24 | 建立基线：克隆 MeloongCore 子模块、初始化 git、备份脚本、DEVNOTES、CHANGELOG | ✅ 已完成 |
-| v0.2.0 | — | 补齐构建环境（.NET SDK），确认 `dotnet restore` + `msbuild` 能出 exe | ⏳ 进行中 |
-| v0.3.0 | — | DSH 基础设施：运行环境检测/管理、版本仓库、整合包实例模型 | ☐ |
-| v0.4.0 | — | 启动链路：启动按钮 → `dsh web` → 自动开浏览器 | ☐ |
-| v0.5.0 | — | 下载页：alpha/rc 分类 + 发布时间 + 安装 | ☐ |
-| v0.6.0 | — | 插件/技能独立管理与开关 | ☐ |
-| v0.7.0 | — | 设置页 + 首次启动引导 | ☐ |
-| v1.0.0 | — | 术语清理、稳定性收尾、文档完善 | ☐ |
+| v0.2.0 | 2026-09-24 | 打通本地构建环境（便携 .NET 9 SDK + 四个构建补丁），`dotnet msbuild` 可产出 exe | ✅ 已完成 |
+| v0.3.0 | 2026-09-24 | DSH 基础设施 7 个模块 + 3 个新页面 + 启动按钮改造 + 14 个设置项；**编译通过，产出 5.72 MB exe** | ✅ 已完成 |
+| v0.4.0 | — | 运行验证与修正：实际启动一次整合包、验证浏览器自动打开、验证技能/插件开关生效 | ⏳ 待做 |
+| v0.5.0 | — | 术语清理：启动页/关于页的 Minecraft 残留文案、账号与皮肤入口隐藏、联机页处理 | ☐ |
+| v0.6.0 | — | 引导完善：Node 下载进度提示、失败重试、镜像源切换；首次启动引导的视觉打磨 | ☐ |
+| v0.7.0 | — | 插件市场/技能导入的易用性（拖入 zip、从 URL 导入）；整合包导出/导入（.dshpack） | ☐ |
+| v1.0.0 | — | 稳定性收尾、错误处理完善、文档完善 | ☐ |
+
+### 已知未完成 / 待验证（下一次接手先看这里）
+
+1. **没有实机运行验证过**。v0.3.0 只做到「编译通过 + 静态审查」，没有真正启动过整合包。
+   第一次运行请重点检查：
+   - `DshEnsureFirstRun` 的弹窗顺序是否会卡住 UI（`RunInUiWait` + `WaitForExit` 的组合）
+   - `DshInstanceListLoader.WaitForExit()` 在 UI 线程被调用会不会死锁
+     （`DshEnsureFirstRun` 在后台线程调用，应该没问题；`PageDshManager` 里在 UI 线程调用过，需要实测）
+   - `ModDshLaunch` 的 stdout 时序：dsh 是否真的把 URL 打到 stdout
+2. **技能开关的实现依赖 dsh 的扫描规则**（只认一层目录 + `SKILL.md`），已按源码核实，但没实测过。
+3. **插件开关写 `cordis.patch.yml` 的格式**是按 dsh 文档推断的（`- name: X` / `disabled: true`），
+   需要实测确认；`DshReadDisabledPlugins` 的解析也是按这个格式写的。
+4. **DshManager 页面的布局没有设计稿**，是直出实现的，视觉上还需要打磨。
+5. `ModDshInstall` 的 npm 安装没有接 PCL 的下载任务栏（`LoaderTaskbar`），进度只在日志里。
+6. 启动页仍然显示 Minecraft 的账号/皮肤区域（已设为 `IsHitTestVisible = False` 并隐藏部分元素），
+   但没有彻底移除，术语清理留待 v0.5.0。

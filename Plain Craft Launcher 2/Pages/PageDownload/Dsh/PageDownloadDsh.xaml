@@ -1,0 +1,48 @@
+<local:MyPageRight
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="clr-namespace:PCL" xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d" x:Class="PageDownloadDsh"
+    PanScroll="PanBack">
+    <Grid>
+        <Grid Name="PanAllBack">
+            <local:MyScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" x:Name="PanBack">
+                <Grid Margin="25,10,25,25" Name="PanInner">
+                    <StackPanel Name="PanLoad" />
+                    <StackPanel Name="PanContent" Visibility="Collapsed">
+                        <Grid Margin="0,0,0,0">
+                            <TextBlock Text="DeepSeekHarness 版本" FontSize="14" VerticalAlignment="Center" Margin="2,0,0,0" />
+                            <local:MyIconButton x:Name="BtnRefresh" HorizontalAlignment="Right" VerticalAlignment="Center" Height="26" Width="26"
+                                                LogoScale="0.85" ToolTip="重新获取版本列表" Click="Refresh_Click"
+                                                Logo="M512.0 838.3c-80.2 0-153.4-29.3-210.2-77.4l75.5-75.5c11.5-11.5 25.8-22.0 25.8-37.0a27.2 27.2 0 0 0-27.1-27.1H104.0c-27.1 0-27.1 23.9-27.1 27.1v271.9a27.1 27.1 0 0 0 27.1 27.1c15.0 0 27.8-16.6 42.5-31.2l77.9-77.9c76.6 67.7 177.1 108.9 287.4 108.9 221.7 0 404.5-166.0 431.2-380.6h-109.8c-25.9 154.2-159.7 271.9-321.3 271.9zM919.9 76.6c-15.0 0-27.8 16.6-42.5 31.3L799.5 185.8c-76.5-67.7-177.1-108.9-287.4-108.9-221.8 0-404.5 166.1-431.3 380.6H190.6c25.9-154.2 159.7-271.9 321.4-271.9 80.2 0 153.4 29.3 210.1 77.4l-75.5 75.5c-11.6 11.5-25.8 22.0-25.8 37.1a27.2 27.2 0 0 0 27.1 27.1h271.9c27.1 0 27.1-23.9 27.1-27.1V103.8a27.1 27.1 0 0 0-27.1-27.1z" />
+                        </Grid>
+                        <TextBlock x:Name="LabSource" Text="" Margin="2,8,0,0" Opacity="0.6" FontSize="12" TextWrapping="Wrap" />
+                        <local:MyHint x:Name="HintWarning" Text="" Theme="Yellow" Margin="0,10,0,0" Visibility="Collapsed" />
+
+                        <local:MyCard Title="Alpha 测试版" Margin="0,14,0,0" x:Name="CardAlpha">
+                            <StackPanel Margin="20,40,18,15" VerticalAlignment="Top" Name="PanAlpha" />
+                        </local:MyCard>
+
+                        <local:MyCard Title="RC 候选版" Margin="0,14,0,0" x:Name="CardRelease">
+                            <StackPanel Margin="20,40,18,15" VerticalAlignment="Top" Name="PanRelease" />
+                        </local:MyCard>
+
+                        <local:MyCard Title="其他版本" Margin="0,14,0,0" x:Name="CardOther" Visibility="Collapsed">
+                            <StackPanel Margin="20,40,18,15" VerticalAlignment="Top" Name="PanOther" />
+                        </local:MyCard>
+
+                        <local:MyCard Margin="0,14,0,0" Title="版本仓库位置">
+                            <Grid Margin="21,40,21,16">
+                                <StackPanel>
+                                    <TextBlock x:Name="LabRoot" Text="" TextWrapping="Wrap" Opacity="0.75" FontSize="12" />
+                                    <TextBlock Text="可以到「设置 → DSH 运行环境」里修改本体位置。" Margin="0,8,0,0" Opacity="0.6" FontSize="12" />
+                                </StackPanel>
+                            </Grid>
+                        </local:MyCard>
+                    </StackPanel>
+                </Grid>
+            </local:MyScrollViewer>
+            <local:MyLoading x:Name="Load" HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Grid>
+    </Grid>
+</local:MyPageRight>

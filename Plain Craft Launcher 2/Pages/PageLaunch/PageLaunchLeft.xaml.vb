@@ -18,7 +18,13 @@ Public Class PageLaunchLeft
         '开始按钮
         AddHandler McInstanceListLoader.LoadingStateChanged, AddressOf RefreshButtonsUI
         AddHandler McFolderListLoader.LoadingStateChanged, AddressOf RefreshButtonsUI
+        AddHandler DshInstanceListLoader.LoadingStateChanged, AddressOf RefreshButtonsUI
+        AddHandler DshVersionListLoader.LoadingStateChanged, AddressOf RefreshButtonsUI
         RefreshButtonsUI()
+
+        'DSH 模式：先扫整合包列表（不联网），并触发首次启动引导
+        DshInstanceListLoader.Start(0)
+        DshEnsureFirstRun()
 
         '加载版本
         RunInNewThread(
@@ -623,6 +629,22 @@ Finish:
             FrmMain.BtnExtraApril.ShowRefresh()
         End If
         '实际的启动
+        If DshModeEnabled() Then
+            '=== DSH 模式：启动 DeepSeekHarness ===
+            If BtnLaunch.Text = "下载 dsh" Then
+                FrmMain.PageChange(FormMain.PageType.Download, FormMain.PageSubType.DownloadDsh)
+                Return
+            End If
+            If DshIsRunning Then
+                '已在运行：直接再打开一次浏览器
+                If DshWebUrl <> "" Then DshOpenBrowser(DshWebUrl)
+                Return
+            End If
+            DshLaunchStart(DshInstanceSelected)
+            Return
+        End If
+
+        '=== 原版模式：启动 Minecraft ===
         If BtnLaunch.Text = "启动游戏" Then
             McLaunchStart()
         ElseIf BtnLaunch.Text = "下载游戏" Then
@@ -631,8 +653,97 @@ Finish:
     End Sub
     Private BtnLaunchState As Integer = 0
     Private BtnLaunchInstance As McInstance = Nothing
+
+    ''' <summary>
+    ''' 是否处于 DSH 模式（本魔改版默认启用）。
+    ''' 启用后：启动按钮变为"启动 DeepSeekHarness"、版本选择变为整合包选择、
+    ''' Minecraft 的账号/皮肤/联机界面不再显示。
+    ''' </summary>
+    Public Shared Function DshModeEnabled() As Boolean
+        Return DshSetting("DshMode", True)
+    End Function
+
+    ''' <summary>
+    ''' DSH 模式下的启动按钮状态刷新。
+    ''' </summary>
+    Private Sub RefreshDshButtonsUI()
+        If Not BtnLaunch.IsLoaded Then Return
+
+        Dim Instance As DshInstance = DshInstanceSelected
+        Dim Loading_ As Boolean = (DshInstanceListLoader.State = LoadState.Loading)
+
+        '当前状态：0 加载中 / 1 无整合包 / 2 有整合包但不能启动 / 3 可启动
+        Dim CurrentState As Integer
+        If Loading_ Then
+            CurrentState = 0
+        ElseIf Instance Is Nothing Then
+            CurrentState = 1
+        ElseIf Not Instance.CanLaunch Then
+            CurrentState = 2
+        Else
+            CurrentState = 3
+        End If
+
+        Dim StateKey As String = CurrentState & "|" & If(Instance Is Nothing, "", Instance.PathInstance) & "|" & DshIsRunning.ToString()
+        If StateKey = DshBtnLastKey Then
+            '即使状态没变，运行中的按钮文案仍要刷新
+            If DshIsRunning Then BtnLaunch.Text = "打开 DeepSeekHarness"
+            GoTo ExitRefresh
+        End If
+        DshBtnLastKey = StateKey
+
+        Select Case CurrentState
+            Case 0
+                Logger.Info("启动按钮：正在加载整合包列表")
+                BtnLaunch.Text = "正在加载"
+                BtnLaunch.IsEnabled = False
+                LabVersion.Text = "正在加载整合包列表，请稍候"
+                BtnMore.Visibility = Visibility.Collapsed
+            Case 1
+                Logger.Info("启动按钮：还没有任何整合包")
+                BtnLaunch.Text = "新建整合包"
+                BtnLaunch.IsEnabled = True
+                LabVersion.Text = "还没有整合包，点一下新建一个"
+                BtnMore.Visibility = Visibility.Collapsed
+            Case 2
+                Logger.Info($"启动按钮：整合包 {Instance.Name} 尚不可启动（{Instance.ErrorMessage}）")
+                If Not Instance.IsVersionInstalled Then
+                    BtnLaunch.Text = "下载 dsh"
+                    LabVersion.Text = $"整合包「{Instance.Name}」绑定的 dsh {Instance.DshVersion} 尚未安装"
+                Else
+                    BtnLaunch.Text = "启动 DeepSeekHarness"
+                    BtnLaunch.IsEnabled = False
+                    LabVersion.Text = $"整合包「{Instance.Name}」不可用：{Instance.ErrorMessage}"
+                End If
+                BtnLaunch.IsEnabled = True
+                BtnMore.Visibility = Visibility.Collapsed
+            Case 3
+                Logger.Info($"启动按钮：整合包 {Instance.Name}（dsh {Instance.DshVersion}）")
+                BtnLaunch.IsEnabled = True
+                BtnLaunch.Text = If(DshIsRunning, "打开 DeepSeekHarness", "启动 DeepSeekHarness")
+                LabVersion.Text = $"{Instance.Name}　·　dsh {Instance.DshVersion}　·　端口 {Instance.Port}"
+                BtnMore.Visibility = Visibility.Visible
+        End Select
+
+        '新建整合包在状态 1 时也允许点击
+        If CurrentState = 1 Then BtnLaunch.IsEnabled = True
+
+ExitRefresh:
+        '功能隐藏
+        BtnVersion.Visibility = If(Not PageSetupUI.HiddenForceShow AndAlso Settings.Get(Of Boolean)("UiHiddenFunctionSelect"), Visibility.Collapsed, Visibility.Visible)
+        If CurrentState = 3 Then BtnMore.Visibility = BtnVersion.Visibility
+        'DSH 模式下不需要账号界面
+        PanLogin.IsHitTestVisible = False
+    End Sub
+    Private DshBtnLastKey As String = ""
+
     Public Sub RefreshButtonsUI() Handles BtnLaunch.Loaded
         If Not BtnLaunch.IsLoaded Then Return
+        If DshModeEnabled() Then
+            RefreshDshButtonsUI()
+            Return
+        End If
+        '以下为原版 Minecraft 模式
         '获取当前状态
         Dim CurrentState As Integer
         If (Not IsLoadFinished) OrElse McInstanceListLoader.State = LoadState.Loading OrElse McFolderListLoader.State = LoadState.Loading Then
@@ -708,6 +819,13 @@ ExitRefresh:
     End Sub
     '版本设置按钮
     Private Sub BtnMore_Click() Handles BtnMore.Click
+        If DshModeEnabled() Then
+            'DSH 模式：进入整合包管理（插件 / 技能 / 设置）
+            If FrmDshManager Is Nothing Then FrmDshManager = New PageDshManager
+            FrmDshManager.LoadInstance(DshInstanceSelected)
+            FrmMain.PageChange(FormMain.PageType.DshManager)
+            Return
+        End If
         If McLaunchLoader.State = LoadState.Loading Then Return
         McInstanceSelected.Load()
         PageInstanceLeft.Instance = McInstanceSelected

@@ -2,6 +2,11 @@ Imports System.Security.Cryptography
 
 Public Class Settings
 
+    ' ===== DSH 魔改新增的设置项 =====
+    ' 全局：DshMode / DshRuntimeRoot / DshVersionRoot / DshSetupFinished / DshNpmSource / DshAutoOpenBrowser
+    '       DshStopOnExit / DshDefaultVersion / DshDefaultWorkspace / DshInstanceSelected / DshDisableTelemetry
+    ' 整合包级（Source:=Sources.Instance）：DshInstanceVersion / DshInstancePort / DshInstanceAutoOpen
+    ' 注意：集合初始值设定项的 { } 内部不能出现独占一行的注释，只能写行尾注释，故说明放在这里。
     Public Shared ReadOnly Entries As Dictionary(Of String, Setting) = (New List(Of Setting) From {
         New Setting("Identify", "", Source:=Sources.Registry),
         New Setting("WindowHeight", 550),
@@ -193,7 +198,21 @@ Public Class Settings
         New Setting("VersionServerNide", "", Source:=Sources.Instance),
         New Setting("VersionServerAuthRegister", "", Source:=Sources.Instance),
         New Setting("VersionServerAuthName", "", Source:=Sources.Instance),
-        New Setting("VersionServerAuthServer", "", Source:=Sources.Instance)
+        New Setting("VersionServerAuthServer", "", Source:=Sources.Instance),
+        New Setting("DshMode", True),
+        New Setting("DshRuntimeRoot", ""),
+        New Setting("DshVersionRoot", ""),
+        New Setting("DshSetupFinished", False),
+        New Setting("DshNpmSource", 1),
+        New Setting("DshAutoOpenBrowser", True),
+        New Setting("DshStopOnExit", False),
+        New Setting("DshDefaultVersion", ""),
+        New Setting("DshDefaultWorkspace", ""),
+        New Setting("DshInstanceSelected", ""),
+        New Setting("DshDisableTelemetry", True),
+        New Setting("DshInstanceVersion", "", Source:=Sources.Instance),
+        New Setting("DshInstancePort", DshDefaultPort, Source:=Sources.Instance),
+        New Setting("DshInstanceAutoOpen", True, Source:=Sources.Instance)
     }).ToDictionary(Function(e) e.Key)
 
     Public Enum Sources

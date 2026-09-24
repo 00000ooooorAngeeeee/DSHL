@@ -549,6 +549,16 @@ Public Class FormMain
     ''' </summary>
     ''' <param name="SendWarning">是否在还有下载任务未完成时发出警告。</param>
     Public Sub EndProgram(SendWarning As Boolean)
+        'DSH 魔改新增：按设置决定是否一并结束由本启动器拉起的 dsh 进程
+        Try
+            If DshSetting("DshStopOnExit", False) AndAlso DshIsRunning Then
+                If Not SendWarning OrElse MyMsgBox("是否一并关闭正在运行的 DeepSeekHarness？", "退出提示", "一并关闭", "保持运行") = 1 Then
+                    DshStop(Quiet:=True)
+                End If
+            End If
+        Catch ex As Exception
+            Logger.Warn(ex, "退出时处理 dsh 进程失败")
+        End Try
         '强行结束下载任务？
         If HasDownloadingTask() Then
             If SendWarning AndAlso MyMsgBox("还有下载任务尚未完成，是否确定退出？", "提示", "确定", "取消") = 2 Then Return
@@ -1195,6 +1205,10 @@ Public Class FormMain
         ''' 帮助详情。这是一个副页面。
         ''' </summary>
         HelpDetail = 9
+        ''' <summary>
+        ''' 整合包管理（插件/技能/设置）。DSH 魔改新增，是一个顶级页面。
+        ''' </summary>
+        DshManager = 10
     End Enum
     ''' <summary>
     ''' 次要页面种类。其数值必须与 StackPanel 中的下标一致。
@@ -1208,10 +1222,18 @@ Public Class FormMain
         DownloadDataPack = 4
         DownloadResourcePack = 5
         DownloadShader = 6
+        ''' <summary>
+        ''' DSH 版本下载（DSH 魔改新增，下标 7，必须与 PageDownloadLeft 的 StackPanel 下标一致）。
+        ''' </summary>
+        DownloadDsh = 7
         SetupLaunch = 0
         SetupLink = 1
         SetupUI = 2
         SetupSystem = 3
+        ''' <summary>
+        ''' DSH 运行环境设置（DSH 魔改新增，下标 4，必须与 PageSetupLeft 的 StackPanel 下标一致）。
+        ''' </summary>
+        SetupDsh = 4
         LinkMain = 0
         OtherHelp = 0
         OtherAbout = 1
@@ -1464,6 +1486,9 @@ Public Class FormMain
                     PageChangeAnim(New MyPageLeft, FrmDownloadResourceDetail)
                 Case PageType.HelpDetail '帮助详情
                     PageChangeAnim(New MyPageLeft, Stack.Additional(1))
+                Case PageType.DshManager '整合包管理（DSH 魔改新增）
+                    If FrmDshManager Is Nothing Then FrmDshManager = New PageDshManager
+                    PageChangeAnim(New MyPageLeft, FrmDshManager)
             End Select
 #End Region
 

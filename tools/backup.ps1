@@ -2,7 +2,7 @@
     备份脚本 — 每次修改源码前运行一次。
 
     用法（在 PCL-2.13.1.1 目录下）：
-        pwsh -File tools\backup.ps1 -Note "v0.1.0 实现启动链路"
+        powershell -ExecutionPolicy Bypass -File tools\backup.ps1 -Note "v0.1.0 实现启动链路"
 
     行为：
       1. 把当前源码树（排除 bin/obj/backups）打包成

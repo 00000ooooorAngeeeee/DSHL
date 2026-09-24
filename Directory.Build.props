@@ -1,0 +1,57 @@
+<Project>
+  <!--
+    ==========================================================================================
+    DSH 魔改新增：本地构建环境补丁（不影响官方 CI / Visual Studio 环境）
+
+    背景：本机没有安装 Visual Studio，只能用 .NET SDK 自带的 MSBuild（dotnet msbuild）。
+    它在编译 PCL 这种“旧式 VB.NET WPF 工程 + net48”时会缺三样东西，这里逐一补齐：
+
+      1. .NET Framework 4.8 的引用程序集（否则 MSB3644）
+         → 通过 NuGet 包 Microsoft.NETFramework.ReferenceAssemblies 提供
+      2. VB 运行库 Microsoft.VisualBasic.dll 的路径（否则 BC2017）
+         → 显式设置 VBRuntime
+      3. XAML 编译目标 Microsoft.WinFX.targets（否则不生成 .g.vb，出现几百个“找不到事件”）
+         → 已在 Plain Craft Launcher 2.vbproj 末尾显式 Import
+      4. XAML 编译器解析 Microsoft.VisualBasic 的搜索路径（否则 MC2000）
+         → 追加到 KnownReferencePaths
+
+    官方 CI 用 microsoft/setup-msbuild 装的 VS2022 MSBuild，这些都由 VS 自带，
+    本文件的设置对它来说是幂等的（路径存在才会生效）。
+    ==========================================================================================
+  -->
+  <PropertyGroup>
+    <DshBuildPropsImported>true</DshBuildPropsImported>
+    <DshRefAsmDir>$(UserProfile)\.nuget\packages\microsoft.netframework.referenceassemblies.net48\1.0.3\build\.NETFramework\v4.8\</DshRefAsmDir>
+    <DshRefAsmExists Condition="Exists('$(DshRefAsmDir)mscorlib.dll')">true</DshRefAsmExists>
+  </PropertyGroup>
+
+  <!-- (1) 用 NuGet 包补齐 net48 引用程序集 -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all"
+                      Condition="'$(TargetFrameworkIdentifier)' == '.NETFramework' OR '$(TargetFrameworkVersion)' != ''" />
+  </ItemGroup>
+
+  <!--
+    (2)(4) VB 运行库路径与 XAML 编译器的引用搜索路径。
+    必须限定为「PCL 的 VB WPF 工程」：这几个属性一旦泄漏到 netstandard2.0 的
+    C# 子项目（MeloongCore / PCLCS），会把 .NET Framework 的引用程序集塞进去，
+    导致 CS0518「预定义类型 System.String 未定义」。
+  -->
+  <PropertyGroup Condition="'$(DshRefAsmExists)' == 'true' AND '$(MSBuildProjectExtension)' == '.vbproj'">
+    <VBRuntime>$(DshRefAsmDir)Microsoft.VisualBasic.dll</VBRuntime>
+    <VBRuntimePath>$(DshRefAsmDir)Microsoft.VisualBasic.dll</VBRuntimePath>
+    <KnownReferencePaths>$(DshRefAsmDir);$(DshRefAsmDir)Facades;$(KnownReferencePaths)</KnownReferencePaths>
+  </PropertyGroup>
+
+  <!--
+    (5) XAML 编译器（MarkupCompilePass1）只会从 @(ReferencePath) 里找 Microsoft.VisualBasic。
+    VB 工程平时靠 TargetFrameworkDirectory 隐式引用它，而本机该属性为空，
+    所以这里显式加一条引用，让引用解析把它放进 ReferencePath。
+  -->
+  <ItemGroup Condition="'$(DshRefAsmExists)' == 'true' AND '$(MSBuildProjectExtension)' == '.vbproj'">
+    <Reference Include="Microsoft.VisualBasic">
+      <HintPath>$(DshRefAsmDir)Microsoft.VisualBasic.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+</Project>
