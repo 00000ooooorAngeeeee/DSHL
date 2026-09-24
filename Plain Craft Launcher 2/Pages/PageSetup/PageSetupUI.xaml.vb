@@ -26,6 +26,29 @@ Public Class PageSetupUI
         If Reloaded Then Return
         Reloaded = True
 
+        'DSH 魔改：主题单选按钮的处理。
+        '为什么要动它（根因）：开源版删掉了"主题编号 → HSL"的映射表（见 ModSecret.DshThemeHsl），
+        '`ThemeRefresh` 只用当前 HSL 全局变量重算颜色 → 点主题颜色纹丝不动；
+        '`ThemeCheckAll` 原本也是空实现 → 单选按钮不反映已保存的主题。
+        '这里只做两件事：① 挂上"选中即应用主题"的事件；② 放开被锁的隐藏主题。
+        '**勾选状态交给 PCL 自己的 SettingService.RefreshSettings**（它会对每个 ISettingControl
+        '调用 RefreshSetting，即 `Checked = NewValue = SettingService.GetValue(Me)`）。
+        '不要在这里手动 `Box.Checked = ...`：MyRadioBox.SetChecked 里有"最多一个选中 / 一个都没选就自动选第一个"
+        '的联动逻辑，手动逐个赋值会与它打架（实测出现过选错主题）。
+        For Each Control In PanLauncherTheme.Children
+            If TypeOf Control Is MyRadioBox Then
+                Dim Box As MyRadioBox = CType(Control, MyRadioBox)
+                '开源版没有解锁途径（ThemeUnlock 是空实现），一律放开可用
+                Box.IsEnabled = True
+                AddHandler Box.Changed, AddressOf DshThemeRadioChanged
+            End If
+        Next
+        SettingService.RefreshSettings(Me) '按已保存的设置勾选主题
+        '没有取色器，"自定义"等同于默认色，标注一下
+        RadioLauncherTheme14.Text = "自定义（等同默认）"
+        RadioLauncherTheme14.ToolTip = "开源版不含取色器，此选项等同「龙猫蓝」"
+        ThemeCheckAll(True) '按已保存的主题设置 HSL 并刷新颜色
+
         SliderLoad()
 
         If BuildType = BuildTypes.Release Then PanLauncherHide.Visibility = Visibility.Visible
@@ -38,6 +61,21 @@ Public Class PageSetupUI
         '极客蓝的处理在 ThemeCheck 中
 
     End Sub
+    ''' <summary>
+    ''' DSH 魔改：某个主题被选中 → 应用它。
+    ''' 开源版删掉了"主题编号 → HSL"的映射表（详见 ModSecret.DshThemeHsl 的说明），
+    ''' 所以这里显式按编号设 HSL 再刷新，否则点主题颜色不会变。
+    ''' </summary>
+    Private Sub DshThemeRadioChanged(sender As Object, e As RouteEventArgs)
+        Try
+            Dim Box As MyRadioBox = TryCast(sender, MyRadioBox)
+            If Box Is Nothing OrElse Not Box.Checked Then Return
+            DshApplyTheme(Val(SettingService.GetValue(Box)))
+        Catch ex As Exception
+            Logger.Warn(ex, "应用主题失败")
+        End Try
+    End Sub
+
     Public Sub Refresh()
         Try
             SettingService.RefreshSettings(Me)

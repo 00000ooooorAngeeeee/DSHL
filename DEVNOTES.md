@@ -527,6 +527,35 @@ E:\DeepseekHarnessWP\
     `IsPageSwitched / PageID / ItemManager.Checked / ItemUI.Checked`，
     一次运行就把真相打在日志里了。**日志要打印"判断条件用到的所有量"，而不只是结论。**
 
+75. **PCL 开源版删掉的不只是"密钥"，还有一整块功能逻辑** —— 排查问题时先确认"原版是不是本来就没有"。
+    实例（用户报"个性化里改主题颜色不生效"）：
+      · `ModSecret.vb` 开头写着"由于包含加解密等安全信息，本文件中的部分代码已被删除"；
+      · 被删掉的部分里包含 **「主题编号 → HSL」的映射表**。`ThemeRefresh` 本身还在，
+        但它只用当前 HSL 全局变量（`ColorHue/ColorSat/ColorLightAdjust`）重算颜色，
+        编号→HSL 这一步没了 → 点主题时 hue 不变，**颜色自然纹丝不动**；
+      · `ThemeCheckAll` / `ThemeCheckOne` / `ThemeUnlock` 也被留成了空壳
+        （空实现 / 恒返回 True / 恒返回 False）→ 主题单选按钮不反映已保存的主题、隐藏主题永远灰着。
+    → 结论：**"某功能不生效"要先看是不是开源版本来就没有**，别先怀疑自己的改动。
+      证据链：`SettingService` 里 `OnChanged:=AddressOf ThemeRefresh` 是**原版就有的**，
+      说明设计上确实靠它切主题，缺的只是映射表。
+
+76. **主题单选按钮没有 `Tag`，编号在 `local:SettingService.Value` 里**：
+    `SettingService.GetValue(控件)` 返回那个字符串。第一版我用 `Val(Box.Tag)` 取值，
+    全部取到 0（没有 Tag 就是 Nothing/0）→ 选错主题。
+    PCL 自己的写法（`MyRadioBox.RefreshSetting`）就是 `Checked = NewValue = SettingService.GetValue(Me)`，
+    照着它写就对了。
+
+77. **不要手动给 `MyRadioBox.Checked` 逐个赋值**：`MyRadioBox.SetChecked` 里有
+    "最多一个选中 / 一个都没选就自动选第一个"的联动逻辑。我在循环里给每个按钮赋值，
+    与它打架，实测出现"明明设了 2（小草绿），最后选中的是 4（橡木棕）"。
+    → 正解：**交给 `SettingService.RefreshSettings(Me)`** —— 它会对每个 `ISettingControl`
+      调用 `RefreshSetting`，按已保存的设置勾选。自己只负责"挂事件"和"放开锁定的项"。
+
+78. **`ModSecret` 是模块，访问不到窗体的控件**：写 `FrmSetupUI.RadioLauncherTheme14` 报
+    `未声明"RadioLauncherTheme14"`。要写成 `FrmSetupUI.RadioLauncherTheme14`。
+    另外**不要在 `ThemeCheckAll` 里碰控件** —— 启动早期它被 `FormMain` 调用时
+    `FrmSetupUI` 还是 `Nothing`，会抛"未将对象引用设置到对象的实例"（实测踩过）。
+
 ---
 
 ## 8b. 本地构建环境搭建记录（v0.3.0 完成）

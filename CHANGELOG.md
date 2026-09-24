@@ -5,7 +5,65 @@
 
 ---
 
-## [v0.5.2] — 2026-09-24
+## [v0.6.0] — 2026-09-24
+
+### 修复：个性化里的主题颜色点了不生效（用户反馈）
+这**不是本项目的改动导致的**，是 PCL 开源版的功能缺失 —— 证据链：
+
+```vb
+' ModSecret.vb 开头：「由于包含加解密等安全信息，本文件中的部分代码已被删除」
+Friend Sub ThemeCheckAll(EffectSetup As Boolean)
+End Sub                                    ' ← 空实现
+Friend Function ThemeCheckOne(Id As Integer) As Boolean
+    Return True                            ' ← 空实现
+End Function
+Friend Function ThemeUnlock(...) As Boolean
+    Return False                           ' ← 空实现
+End Function
+
+' ModSecret.vb：ThemeRefresh 只用当前 HSL 全局变量重算颜色
+Public ColorHue As Integer = 210, ColorSat As Integer = 85, ColorLightAdjust As Integer = 0
+
+' Settings.vb:140：设置项的回调是原版就有的，说明设计上确实靠它切主题
+New Setting("UiLauncherTheme", 0, OnChanged:=AddressOf ThemeRefresh),
+```
+
+**缺的就是「主题编号 → HSL」这一步**：`ThemeRefresh` 被正常调用了，但 hue 没变 → 颜色不变。
+而 `ThemeCheckAll` 是空的 → 主题单选按钮也不反映已保存的主题（全都是未选中）。
+
+**补上的实现**：
+1. `ModSecret.DshThemeHsl(ThemeId)` —— 15 个主题的 HSL 映射表（hue/饱和度/明度偏移），
+   按"主题名 ≈ 颜色"补的（龙猫蓝=210 为基准：甜柠青 165 / 小草绿 125 / 菠萝黄 45 /
+   橡木棕 25 / 玄素黑 220×低饱和 / 铁杆粉 335 / 神秘紫 270 / 秋仪金 35 / 活跃橙 18 /
+   跳票红 355 / 极客蓝 205 / 滑稽彩 300 / 欧皇彩 280）。
+2. `ModSecret.DshApplyTheme(ThemeId)` —— 设好 HSL 再 `ThemeRefresh`，作为切换主题的唯一入口。
+3. `ThemeCheckAll` 从空实现改为"读出已保存的主题 → 设 HSL → 刷新颜色"
+   （**不碰控件**，因为启动早期 `FrmSetupUI` 还是 `Nothing`）。
+4. `PageSetupUI` 里给每个主题单选按钮挂 `Changed` → `DshApplyTheme`；
+   并把原本灰着的"隐藏主题"一律放开可用（开源版没有解锁途径，`ThemeUnlock` 恒返回 False）。
+
+**实机确认**：预置 `UiLauncherTheme:2` 启动后，标题栏与按钮都变成了绿色（小草绿）✔
+
+### 顺带记录两条踩坑（DEVNOTES #76/#77）
+- 主题单选按钮**没有 `Tag`**，编号在 `local:SettingService.Value` 里，要用 `SettingService.GetValue(控件)` 取；
+  第一版用 `Val(Box.Tag)` 全部取到 0 → 选错主题。
+- **不要手动逐个给 `MyRadioBox.Checked` 赋值**：`SetChecked` 里有"最多一个选中 / 一个都没选就自动选第一个"
+  的联动逻辑，手动赋值会与它打架（实测"设了小草绿最后选中橡木棕"）。
+  正解是交给 `SettingService.RefreshSettings(Me)`。
+
+### 变更
+- `ModBase.vb`：版本号 `0.5.2` → `0.6.0`。
+- `ModSecret.vb`：新增 `DshThemeHsl` / `DshApplyTheme`；`ThemeCheckAll` 补实现（仍不动控件）。
+- `PageSetupUI.xaml.vb`：挂主题事件、放开隐藏主题、用 `SettingService.RefreshSettings` 同步勾选、
+  标注"自定义（等同默认）"；新增 `DshThemeRadioChanged`。
+- `DEVNOTES.md`：新增 4 条（#75 开源版删掉的是整块功能逻辑要先确认、
+  #76 主题编号在 SettingService.Value 里、#77 别手动赋 MyRadioBox.Checked、
+  #78 ModSecret 访问窗体控件与 ThemeCheckAll 不要碰控件）。
+
+### 仍在推进
+主题单选按钮的**勾选状态**与"点一下立刻变色"需要最终实机过一遍（颜色应用已确认生效）。
+
+---
 
 ### 修复：第二次从启动页点「整合包管理」会显示「个性化」
 上一版我用 `IsPageSwitched` 做守卫，**但诊断日志证明这个条件在读的时候还是 `False`**：

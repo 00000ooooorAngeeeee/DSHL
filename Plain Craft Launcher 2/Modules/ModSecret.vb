@@ -131,11 +131,81 @@ Friend Module ModSecret
             FrmMain.PanForm.Background.Freeze()
         End Sub)
     End Sub
+    ''' <summary>
+    ''' 主题编号 → 色相/饱和度。
+    '''
+    ''' 背景（为什么要自己补这张表）：本文件开头的说明写着"由于包含加解密等安全信息，本文件中的部分代码已被删除"，
+    ''' 而**主题编号 → HSL 的映射表就在被删掉的那部分里**。于是开源版出现两个现象：
+    '''   · `ThemeRefresh` 只会用当前 HSL 全局变量重算颜色 → 换主题时 hue 没变，界面颜色纹丝不动；
+    '''   · `ThemeCheckAll` 是空实现 → 主题单选按钮不反映已保存的主题（全都是未选中）。
+    ''' 这里按"主题名 ≈ 颜色"的常识补一份合理的映射（hue 0~360，参照龙猫蓝=210）。
+    ''' "隐藏主题"（玄素黑 5 / 滑稽彩 12 / 欧皇彩 13，以及原本要赞助或做任务解锁的几个）
+    ''' 在开源版里没有解锁途径（`ThemeUnlock` 也是空实现），所以 DSH 启动器里一律放开可用。
+    ''' </summary>
+    Friend Function DshThemeHsl(ThemeId As Integer) As (Hue As Integer, Sat As Integer, LightAdjust As Integer)
+        Select Case ThemeId
+            Case 0 : Return (210, 85, 0)   '龙猫蓝（默认）
+            Case 1 : Return (165, 80, 0)   '甜柠青
+            Case 2 : Return (125, 65, 0)   '小草绿
+            Case 3 : Return (45, 90, 0)    '菠萝黄
+            Case 4 : Return (25, 55, -5)   '橡木棕
+            Case 5 : Return (220, 12, -35) '玄素黑（隐藏主题）
+            Case 6 : Return (335, 70, 5)   '铁杆粉
+            Case 7 : Return (270, 65, 0)   '神秘紫
+            Case 8 : Return (35, 85, 8)    '秋仪金
+            Case 9 : Return (18, 90, 5)    '活跃橙
+            Case 10 : Return (355, 80, 3)  '跳票红
+            Case 11 : Return (205, 95, 0)  '极客蓝
+            Case 12 : Return (300, 85, 0)  '滑稽彩（隐藏主题；原本是彩色动画，这里退化为单色）
+            Case 13 : Return (280, 90, 15) '欧皇彩（隐藏主题）
+            Case 14 : Return (210, 85, 0)  '自定义（没有取色器，退化为默认色）
+            Case Else : Return (210, 85, 0)
+        End Select
+    End Function
+
+    ''' <summary>
+    ''' 把已保存的主题设置成"当前主题"（设置 HSL 全局变量 + 刷新颜色）。
+    ''' 供两处调用：① 启动早期（FormMain 读设置时）；② 设置页加载时。
+    ''' 注意：**不要在这里碰控件** —— 启动早期 `FrmSetupUI` 还是 Nothing
+    ''' （第一版就是在这里访问 FrmSetupUI 导致"刷新主题选择失败：未将对象引用设置到对象的实例"）。
+    ''' 单选按钮的勾选状态由 PageSetupUI_Loaded 自己负责。
+    ''' </summary>
     Friend Sub ThemeCheckAll(EffectSetup As Boolean)
+        Try
+            Dim Saved As Integer = Settings.Get(Of Integer)("UiLauncherTheme")
+            Dim Hsl = DshThemeHsl(Saved)
+            ColorHue = Hsl.Hue
+            ColorSat = Hsl.Sat
+            ColorLightAdjust = Hsl.LightAdjust
+            ThemeNow = -1          '强制 ThemeRefresh 真正重算（它开头有 ThemeNow = NewTheme 就 return 的判断）
+            ThemeRefresh(Saved)
+        Catch ex As Exception
+            Logger.Warn(ex, "刷新主题颜色失败")
+        End Try
     End Sub
+
     Friend Function ThemeCheckOne(Id As Integer) As Boolean
+        '开源版没有"解锁"概念，全部视为已解锁
         Return True
     End Function
+
+    ''' <summary>
+    ''' 主题切换的唯一入口：把 HSL 设好再刷新。
+    ''' 之所以要包装一层：`ThemeRefresh` 本身只用当前 HSL 变量，不会去查主题编号，
+    ''' 而"编号 → HSL"的表在开源版里被删了（见 DshThemeHsl 的说明）。
+    ''' </summary>
+    Friend Sub DshApplyTheme(ThemeId As Integer)
+        Try
+            Dim Hsl = DshThemeHsl(ThemeId)
+            ColorHue = Hsl.Hue
+            ColorSat = Hsl.Sat
+            ColorLightAdjust = Hsl.LightAdjust
+            ThemeNow = -1
+            ThemeRefresh(ThemeId)
+        Catch ex As Exception
+            Logger.Warn(ex, $"应用主题 {ThemeId} 失败")
+        End Try
+    End Sub
     Friend Function ThemeUnlock(Id As Integer, Optional ShowDoubleHint As Boolean = True, Optional UnlockHint As String = Nothing) As Boolean
         Return False
     End Function
