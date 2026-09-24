@@ -4,7 +4,7 @@
 > 记录**目标、约束、已核实的外部事实、避坑清单、进度**。
 > 改动前请先读 §7 的"工作流程"，并遵守 §8 的"注意事项"。
 
-最后更新：2026-09-24 ・ 启动器版本：`v0.7.2`
+最后更新：2026-09-24 ・ 启动器版本：`v0.7.3`
 
 ---
 
@@ -728,6 +728,32 @@ E:\DeepseekHarnessWP\
        `If PageID = ID Then Return` 也会挡住）。
     **通用教训：隐藏条目时必须检查"默认选中/默认焦点"有没有落在被隐藏的那个上面。**
       这和设置页那条（DEVNOTES #71：初始化里设默认值要先看有没有人显式设过）是同一类问题的两面。
+
+95. **分发包只需要 7 个文件，但少一个都起不来。**
+    实测「只带 exe」是**跑不起来**的：PCL 的 exe 是"外壳"，通过程序集引用依赖别的 dll。
+    用 `ReflectionOnlyLoadFrom(exe).GetReferencedAssemblies()` 查出它引用：
+        MeloongCore.dll / MeloongCore.Wpf.dll / PCLCS.dll
+    再加 `Microsoft.Win32.Registry.dll`（PCL 用注册表隔离分支）与
+    `Plain Craft Launcher 2.exe.config`（.NET Framework 版本声明）、`Plain Craft Launcher 2.xml`（界面文本）。
+    实测：这 7 个文件单独放一个空目录能正常启动并自己创建 `DSH\`、`PCL\`。
+    **不要带 `.pdb`**（调试符号，运行时不需要，省 2.8 MB）。
+    打包脚本见 `tools\dist.ps1`，产物 3.13 MB。
+
+96. **★ 打包/分发时必须排除 `bin\DSH` 与 `bin\PCL`**（与 DEVNOTES #81 同源，但分发场景更严重）：
+      · `bin\DSH` ≈ 978 MB（versions 594 MB + 你整合包的实例 383 MB）
+        —— 那是**收包人自己该重新下载**的东西，且实例里含**你自己的会话与配置**；
+      · `bin\PCL` 是你的设置（主题、隐藏开关、整合包选择）与个人日志。
+    另外实例里那个 `383 MB` 主要是 `DSH_HOME`（dsh 自己的会话/依赖数据），
+    不属于启动器本体。分发脚本里加了一道"禁止出现 DSH/PCL"的断言，防止哪天误加。
+
+97. **PowerShell 5.1 读 `.ps1` 是按 ANSI(GBK) 解析的，UTF-8 无 BOM 的中文脚本会直接语法错误。**
+    现象：`powershell -File tools\dist.ps1` 报一堆
+        Unexpected token '}' / Missing expression after unary operator '--'
+    并且报错里回显的中文是乱码（`璇峰厛鏋勫缓`），这就是"按 GBK 读了 UTF-8"的铁证。
+    → 修法：**带中文的 `.ps1` 必须存成 UTF-8 with BOM**（本仓库 `tools\backup.ps1` 也是这样）。
+      顺带：脚本里生成的 `使用说明.txt` 也必须用 `New-Object System.Text.UTF8Encoding($true)`（带 BOM），
+      否则收包人用记事本打开会乱码。
+    **教训：这个仓库里凡"带中文且会被 PowerShell 执行/记事本打开"的文件，一律 UTF-8 with BOM。**
 
 ---
 

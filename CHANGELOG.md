@@ -5,7 +5,59 @@
 
 ---
 
-## [v0.7.2] — 2026-09-24
+## [v0.7.3] — 2026-09-24
+
+### 新增：分发包打包（回答"想分享给别人该发什么文件"）
+新增 `tools\dist.ps1`，一条命令产出可直接分享的 zip：
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\dist.ps1
+→ E:\DeepseekHarnessWP\dist\PCL2-DSH_v0.7.3_<时间>.zip   （3.13 MB）
+```
+
+**包里只有 8 个文件**：
+
+| 文件 | 为什么必须带 |
+|---|---|
+| `Plain Craft Launcher 2.exe` | 主程序（它其实是个"外壳"，靠程序集引用依赖下面几个 dll） |
+| `MeloongCore.dll` / `MeloongCore.Wpf.dll` / `PCLCS.dll` | 用 `ReflectionOnlyLoadFrom(exe).GetReferencedAssemblies()` 查出的必需依赖 |
+| `Microsoft.Win32.Registry.dll` | PCL 用注册表做分支隔离 |
+| `Plain Craft Launcher 2.exe.config` | .NET Framework 版本声明 |
+| `Plain Craft Launcher 2.xml` | 界面文本资源 |
+| `使用说明.txt` | 给收包人的上手说明（怎么用 / 前置条件 / 常见问题 / 怎么彻底卸载） |
+
+**明确不带的东西**（脚本里还加了断言防止误加）：
+- `bin\DSH`（≈978 MB：versions 594 MB + 实例 383 MB）—— 收包人该自己下，
+  而且实例里含**分享者自己的会话与配置**
+- `bin\PCL`（分享者的设置：主题、隐藏开关、整合包选择 + 个人日志）
+- `*.pdb`（调试符号，运行时不需要，省 2.8 MB）
+
+### 实测验证（解压到空白目录 → 从零启动）
+```
+解压后 8 个文件，无 DSH / 无 PCL ✔
+使用说明.txt 带 UTF-8 BOM，记事本打开中文正常 ✔
+双击启动 → 运行中 ✔
+  日志：程序路径 = 解压目录；首次启动引导 1/2 与 2/2 都弹了 ✔
+  自动创建了 DSH\ 与 PCL\ ✔
+  界面：启动页显示「新建整合包 / 还没有整合包，点一下新建一个」✔
+```
+
+### 收包人需要自备
+- **.NET Framework 4.8**（Win10 1809 以后系统自带，无需额外安装）
+- **Node.js 18+**（必须自己装；启动器会在首次引导第 1 步检测，没装会提示）
+
+### 踩坑（DEVNOTES #97）
+`tools\dist.ps1` 第一次跑直接语法报错，原因是 **PowerShell 5.1 读 `.ps1` 是按 ANSI(GBK) 解析的**，
+UTF-8 无 BOM 的中文脚本会被读成乱码（报错里回显 `璇峰厛鏋勫缓` 就是铁证）。
+→ 带中文的 `.ps1` 与生成的 `使用说明.txt` **都必须存成 UTF-8 with BOM**。
+
+### 变更
+- `tools\dist.ps1`：**新增**（分发包打包脚本，带版本号自动读取与安全断言）。
+- `ModBase.vb`：版本号 `0.7.2` → `0.7.3`。
+- `DEVNOTES.md`：新增 3 条（#95 分发包必需文件清单与如何查依赖、
+  #96 必须排除 DSH/PCL 目录、#97 PowerShell 脚本要 UTF-8 with BOM）。
+
+---
 
 ### 修复：「下载 → DSH 版本」左栏没有显示选中（用户反馈，纯视觉问题）
 用户描述得很准确：关掉再打开 PCL，点「下载」进 DSH 版本界面，
