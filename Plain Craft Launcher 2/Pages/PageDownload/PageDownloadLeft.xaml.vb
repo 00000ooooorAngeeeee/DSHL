@@ -38,9 +38,27 @@ Public Class PageDownloadLeft
         Logger.Info("DSH 模式：下载页只保留「DSH 版本」")
     End Sub
 
-    ''' <summary>本控件加载后应用一次 DSH 模式的显隐。</summary>
+    ''' <summary>
+    ''' 本控件加载后应用一次 DSH 模式的显隐，并补上"初始选中项"。
+    '''
+    ''' ★ 为什么必须补选中（用户实报的视觉 bug）：
+    '''   XAML 里第一个条目 `ItemInstall`（原版游戏）带着 `Checked="True"`，
+    '''   而 DSH 模式下它被上面那个方法设成 `Collapsed` ——
+    '''   结果就是**默认选中项是个看不见的条目**，界面上表现为
+    '''   "进了「下载 → DSH 版本」但左栏没有任何一项显示选中"，
+    '''   点一下才通过 PageCheck 正常选中。
+    '''   这与设置页一样：进入哪个子页面，就让哪一项显示为选中。
+    '''   DSH 模式的下载页只有「DSH 版本」一项，所以这里直接选它。
+    ''' </summary>
     Private Sub PageDownloadLeft_Loaded(sender As Object, e As RoutedEventArgs) Handles Me.Loaded
         ApplyDshModeVisibility()
+        If PageLaunchLeft.DshModeEnabled() Then
+            'PageID 的默认值就是 DownloadDsh，所以这里只补视觉状态，不触发页面切换
+            '（PageCheck 里 `If sender.Tag IsNot Nothing` 之后会走 PageChange(8)，
+            ' 而 PageChange 开头有 `If PageID = ID Then Return`，不会重复切页）
+            ItemDsh.Checked = True
+            Logger.Info("DSH 模式：下载页初始选中「DSH 版本」")
+        End If
     End Sub
 
     ''' <summary>勾选事件改变页面。</summary>
