@@ -572,7 +572,13 @@ Public Class FormMain
         'DSH 魔改新增：按设置决定是否一并结束由本启动器拉起的 dsh 进程
         Try
             Logger.Info($"退出时检查 dsh 状态：{DshStateText()}（SendWarning={SendWarning}）")
-            If DshSetting("DshStopOnExit", False) AndAlso DshIsRunning Then
+            '注意：判定要用 DshInstanceIsAlive（内存引用 + 端口回退），
+            '不能只看 DshIsRunning。后者只看内存里的进程引用，而那个引用可能在别处被清空，
+            '于是出现"状态栏显示运行中、退出时却不结束进程"的不一致
+            '（用户实报：勾了「关闭启动器时一并结束 dsh 进程」但无效）。
+            Dim RunningInst As DshInstance = DshInstanceSelected
+            Dim DshAlive As Boolean = DshIsRunning OrElse DshInstanceIsAlive(RunningInst)
+            If DshSetting("DshStopOnExit", False) AndAlso DshAlive Then
                 Dim CloseIt As Boolean = True
                 If SendWarning Then
                     CloseIt = MyMsgBox("是否一并关闭正在运行的 DeepSeekHarness？", "退出提示", "一并关闭", "保持运行") = 1
@@ -583,6 +589,8 @@ Public Class FormMain
                 Else
                     Logger.Info("用户选择保持 dsh 继续运行")
                 End If
+            Else
+                Logger.Info($"退出时不结束 dsh（设置={DshSetting("DshStopOnExit", False)}, 存活={DshAlive}）")
             End If
         Catch ex As Exception
             Logger.Warn(ex, "退出时处理 dsh 进程失败")

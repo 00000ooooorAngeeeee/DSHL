@@ -5,7 +5,65 @@
 
 ---
 
-## [v0.6.1] — 2026-09-24
+## [v0.6.2] — 2026-09-24
+
+### ⚠️ 先说明一次我造成的事故
+修下面这个 bug 时，我加的第③级兜底扫描**太宽**，把用户**全局安装的 dsh（跑在 3080）也杀掉了**：
+
+```
+兜底结束 dsh 进程 PID 25568   ← 用户的全局 dsh（3080）
+兜底结束 dsh 进程 PID 5312    ← PCL 的（3082）   ← 这次该杀的只有它
+```
+
+万幸全局 dsh 的 subprocess runner 很快把服务重新拉起（3080 已恢复 401），
+`E:\DSHarness\.dsh` 数据完好（109 个文件），但这是一次真实的服务中断。
+**用户的全局环境绝不该被启动器碰。** 已修并在实机验证：现在只杀 3082、3080 完好。
+教训记入 DEVNOTES #82（安全红线，标了 ★★）。
+
+### 修复：点「关闭 DSH」说"没有由启动器启动的进程"，但状态栏显示"运行中"
+用户在整合包管理页看到的矛盾：**状态「运行中」（3082），点「关闭 DSH」却说没有进程**；
+同时设置里勾选「关闭启动器时一并结束由启动器启动的 dsh 进程」也无效。
+
+**根因**：两处用了**不同的判定**——
+| 位置 | 判定方式 | 结论 |
+|---|---|---|
+| 整合包管理页「状态」 | `DshProcessAlive` → 回退到 `DshPortInUse(3082)` | 运行中 ✔ |
+| 「关闭 DSH」 | `DshIsRunning` → **只看内存引用** `DshCurrentProcess` | 没有进程 ✘ |
+
+进程引用会在多处被清空（`DshStop` 的 `Finally`、安装流程的 `DshClearRunningState`、
+进程自然退出后没人复位），引用一丢，两个结论就自相矛盾。
+
+**修法**：
+1. **统一判定**：新增 `DshInstanceIsAlive(Instance)` = ① 内存引用指向它且进程活着
+   ② 端口上有 dsh 在应答（401/303/200）。启动判断、"关闭 DSH"、退出时判断全部改用它。
+2. **`DshStop` 三级兜底**：① 内存进程引用 → ② 按整合包目录 / DSH_HOME 匹配命令行
+   → ③ 只认启动器自己目录的扫描。
+3. **安全红线**（这次事故的直接修法）：所有"扫描进程再杀"的地方都必须
+   - 特征只认启动器自己的 `DSH\versions\` / `DSH\` 目录
+   - 再加硬闸：命令行含 `\appdata\roaming\npm\` 的一律跳过
+   - 三处（`DshStopOwnDshProcesses` / `DshStopProcessesOfInstance` / `DshStopVersionProcesses`）都要加
+4. `EndProgram` 的退出判断同样改用统一判定（修"勾了也不生效"）。
+5. `DshLaunchMain` 的"已在运行"判断也改用它，并尝试重新接管丢失的进程引用
+   （`DshAdoptProcessOfInstance`）。
+6. `DshKillTree`（`taskkill /T /F`）：只 `Kill()` 外壳会留下派生子进程继续占端口。
+
+**实机验证**：
+```
+兜底结束启动器自己的 dsh 进程 PID 5312
+已兜底结束 1 个启动器自己的 dsh 进程
+3080（全局）→ HTTP 401  ✔ 完好未受影响
+3082（PCL） → HTTP 000  ✔ 已关闭
+```
+
+### 变更
+- `ModBase.vb`：版本号 `0.6.1` → `0.6.2`。
+- `ModDshLaunch.vb`：新增 `DshInstanceIsAlive` / `DshStopOwnDshProcesses` / `DshKillTree` /
+  `DshAdoptProcessOfInstance`；重写 `DshStop` 为三级兜底；`DshLaunchMain` 改用统一判定。
+- `FormMain.xaml.vb`：`EndProgram` 改用统一判定。
+- `DEVNOTES.md`：新增 3 条（#82 **安全红线：杀进程的匹配必须收紧**（★★，含事故记录）、
+  #83 内存引用与端口判定必须统一、#84 兜底的匹配条件要比正常级更严）。
+
+---
 
 ### 修复：重装 dsh 时报「无法覆盖已存在的版本目录 … koffi.node 的访问被拒绝」（用户实报）
 日志里的完整报错链：

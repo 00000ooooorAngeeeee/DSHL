@@ -107,11 +107,15 @@ Public Module ModDshLaunch
 
         '0. 已在运行 → 直接开浏览器
         Loader.Progress = 0.05
-        If DshIsRunning AndAlso DshProcessInstance IsNot Nothing AndAlso DshProcessInstance.PathInstance = Instance.PathInstance Then
+        '判定用 DshInstanceIsAlive（内存引用 + 端口回退）：
+        '进程引用可能在别处被清空，只看引用会导致"明明在跑却又去拉一个新的"。
+        If DshInstanceIsAlive(Instance) Then
             DshLog($"整合包 {Instance.Name} 的 DeepSeekHarness 已在运行")
             Dim Reuse As String = If(DshWebUrl <> "", DshWebUrl, DshCachedUrlLoad(Instance))
             If Reuse = "" Then Reuse = DshLocalUrl(Instance.Port)
             If Instance.EffectiveAutoOpenBrowser Then DshOpenBrowser(Reuse)
+            '把丢失的进程引用尽量补回来（找不到也不影响：后续都走端口判定）
+            If DshCurrentProcess Is Nothing Then DshAdoptProcessOfInstance(Instance)
             Return
         End If
 
@@ -265,6 +269,34 @@ Public Module ModDshLaunch
 #Region "浏览器 / 停止"
 
     ''' <summary>
+    ''' 结束一整棵进程树（taskkill /PID x /T /F，失败再退回 Process.Kill）。
+    ''' 为什么不用 Process.Kill 就完事：dsh 会派生子进程，只杀外壳会留下孤儿进程继续占着端口和文件。
+    ''' （ModDshInstall 里有一个同名实现，但那是模块私有、跨模块访问不到，所以这里自带一份。）
+    ''' </summary>
+    Private Sub DshKillTree(Proc As Process)
+        If Proc Is Nothing Then Return
+        Try
+            If Proc.HasExited Then Return
+        Catch
+            Return
+        End Try
+        Try
+            Process.Start(New ProcessStartInfo With {
+                .FileName = "taskkill.exe",
+                .Arguments = $"/PID {Proc.Id} /T /F",
+                .UseShellExecute = False,
+                .CreateNoWindow = True
+            })
+        Catch ex As Exception
+            Logger.Warn(ex, "taskkill 结束进程树失败，回退到 Kill")
+            Try
+                Proc.Kill()
+            Catch
+            End Try
+        End Try
+    End Sub
+
+    ''' <summary>
     ''' 用系统默认浏览器打开指定地址。
     ''' </summary>
     Public Sub DshOpenBrowser(Url As String)
@@ -288,38 +320,235 @@ Public Module ModDshLaunch
 
     ''' <summary>关闭由启动器拉起的 dsh 进程。</summary>
     Public Sub DshStop(Optional Quiet As Boolean = False)
-        If Not DshIsRunning Then
-            If Not Quiet Then Hint("当前没有由启动器启动的 DeepSeekHarness 进程", HintType.Blue)
-            Return
+        '不要把守门条件写成"只看 DshIsRunning"（用户实报的 bug）：
+        '进程引用可能在别处被清掉（见 DshInstanceIsAlive 的说明），
+        '于是出现"状态栏显示运行中、点关闭却报没有进程"的自相矛盾。
+        '
+        '三级兜底，任意一级命中就关：
+        '  ① 内存里有进程引用（最准、最快）
+        '  ② 当前选中的整合包（引用丢了，但知道要关哪个包）
+        '  ③ **扫描所有整合包，看谁占着自己的端口** —— 启动器重启后常常没有"当前选中项"，
+        '     只有靠这一级才能关掉。第一次修的时候就是漏了这点，实测仍然报"没有进程"。
+        Dim InstToStop As DshInstance = Nothing
+        If DshProcessInstance IsNot Nothing Then
+            InstToStop = DshProcessInstance
+        Else
+            If DshInstanceSelected IsNot Nothing AndAlso DshInstanceIsAlive(DshInstanceSelected) Then
+                InstToStop = DshInstanceSelected
+            Else
+                For Each Inst As DshInstance In DshInstanceList
+                    If DshInstanceIsAlive(Inst) Then
+                        InstToStop = Inst
+                        Exit For
+                    End If
+                Next
+            End If
         End If
+
+        Dim Name As String = If(InstToStop Is Nothing, "", InstToStop.Name)
+        Dim Stopped As Boolean = False
+        If DshCurrentProcess IsNot Nothing AndAlso Not DshCurrentProcess.HasExited Then
+            '① 有进程引用：直接结束整棵树（只 Kill 外壳会留下派生子进程占着端口）
+            Try
+                DshKillTree(DshCurrentProcess)
+                Stopped = True
+                Logger.Info($"已关闭整合包 {Name} 的 DeepSeekHarness 进程")
+            Catch ex As Exception
+                Logger.Error(ex, "关闭 dsh 进程失败", LogBehavior.Toast)
+            End Try
+        End If
+        '② 引用没了（或上面没关成功）：按实例目录 / DSH_HOME 把进程找出来结束
+        If Not Stopped AndAlso InstToStop IsNot Nothing Then
+            Stopped = DshStopProcessesOfInstance(InstToStop)
+            If Stopped Then Logger.Info($"已按实例结束整合包 {Name} 的 DeepSeekHarness 进程")
+        End If
+        '③ 最终兜底：只认"启动器自己装的 dsh"（命令行引用 DshVersionRoot / DshRoot）。
+        '**注意绝不能退化成"命令行含 bin.js 就杀"** —— 那会把用户全局安装的 dsh 一起杀掉（犯过）。
+        '为什么还要这一级（实测教训）：启动器重启后 DshInstanceSelected 可能对不上、
+        'DshInstanceList 也可能还没加载完，前两级就都会落空 —— 实测点「关闭 DSH」
+        '日志确实打出了"按下按钮：关闭 DSH"，但依然回"没有进程"，而界面同时显示"运行中"。
+        If Not Stopped Then
+            Dim Cnt As Integer = DshStopOwnDshProcesses()
+            If Cnt > 0 Then
+                Stopped = True
+                Logger.Info($"已兜底结束 {Cnt} 个启动器自己的 dsh 进程")
+            End If
+        End If
+
+        '无论是否真的关掉，都把启动器这边的运行状态复位，避免界面停在"运行中"
+        DshClearRunningState()
+        If InstToStop IsNot Nothing Then
+            Try
+                Dim P As String = InstToStop.PathInstance & ".pcl-web-url"
+                If FileUtils.Exists(P) Then FileUtils.Delete(P)
+            Catch
+            End Try
+        End If
+        DshWebUrl = ""
+
+        If Not Quiet Then
+            If Stopped Then
+                Hint($"已关闭 {Name} 的 DeepSeekHarness", HintType.Green)
+            Else
+                Hint("当前没有由启动器启动的 DeepSeekHarness 进程", HintType.Blue)
+            End If
+        End If
+    End Sub
+
+    ''' <summary>
+    ''' 兜底：结束"本启动器自己安装的"dsh 进程（只认 `DshVersionRoot` 下的入口），返回结束个数。
+    '''
+    ''' ★★ 安全红线（**我在这里犯过严重错误，务必保留这段说明**）★★
+    ''' 第一版我用"命令行里含 `@deepseek-ai\dsh\lib\bin.js`"当特征去扫 —— **太宽了**：
+    ''' 用户全局安装的 dsh（跑在别的端口）用的是同一个包，命令行里同样有这段路径，
+    ''' 于是点「关闭 DSH」把**用户自己的全局 dsh 也杀掉了**（实测日志同时打出两个 PID）。
+    ''' → 因此特征必须收紧到"只可能是启动器装的"，即命令行里出现
+    '''   `DshVersionRoot`（启动器自己的版本仓库，默认 `<启动器目录>\DSH\versions\`）或
+    '''   `DshRoot`（启动器自己的数据目录，默认 `<启动器目录>\DSH\`）。
+    ''' 全局 dsh 的路径形如 `%APPDATA%\npm\node_modules\@deepseek-ai\dsh\...`，
+    ''' 既不在版本仓库里也不在启动器的 DSH 目录里，因此**不会**被这条规则命中。
+    ''' </summary>
+    Private Function DshStopOwnDshProcesses() As Integer
+        Dim Killed As Integer = 0
+        Dim SelfPid As Integer = Process.GetCurrentProcess().Id
+        Dim OwnMarkers As New List(Of String)
         Try
-            Dim Name As String = If(DshProcessInstance Is Nothing, "", DshProcessInstance.Name)
-            Dim Inst As DshInstance = DshProcessInstance
-            DshCurrentProcess.Kill()
-            Logger.Info($"已关闭整合包 {Name} 的 DeepSeekHarness 进程")
-            If Not Quiet Then Hint($"已关闭 {Name} 的 DeepSeekHarness", HintType.Green)
-            '进程没了，缓存的 token 地址也随之失效，清掉避免下次误复用
-            If Inst IsNot Nothing Then
+            OwnMarkers.Add(PathUtils.RemoveSlashSuffix(DshVersionRoot).ToLowerInvariant())
+            OwnMarkers.Add(PathUtils.RemoveSlashSuffix(DshRoot).ToLowerInvariant())
+        Catch
+        End Try
+        Try
+            For Each P As Process In Process.GetProcessesByName("node")
                 Try
-                    Dim P As String = Inst.PathInstance & ".pcl-web-url"
-                    If FileUtils.Exists(P) Then FileUtils.Delete(P)
+                    If P.Id = SelfPid Then Continue For
+                    Dim Cmd As String = ""
+                    Using S As Management.ManagementObject = New Management.ManagementObject($"Win32_Process.Handle='{P.Id}'")
+                        Cmd = If(TryCast(S("CommandLine"), String), "")
+                    End Using
+                    If Cmd = "" Then Continue For
+                    Dim Lower As String = Cmd.ToLowerInvariant()
+                    '只有引用了启动器自己的 DSH 目录才算"我们的"
+                    If Not OwnMarkers.Any(Function(M) M <> "" AndAlso Lower.Contains(M)) Then Continue For
+                    '再排除一层：绝不动全局 npm 安装的 dsh
+                    If Lower.Contains("\appdata\roaming\npm\") Then Continue For
+                    DshKillTree(P)
+                    Logger.Info($"兜底结束启动器自己的 dsh 进程 PID {P.Id}")
+                    Killed += 1
                 Catch
                 End Try
-            End If
-            DshWebUrl = ""
+            Next
         Catch ex As Exception
-            Logger.Error(ex, "关闭 dsh 进程失败", LogBehavior.Toast)
-        Finally
-            DshCurrentProcess = Nothing
-            DshProcessInstance = Nothing
+            Logger.Warn(ex, "兜底结束 dsh 进程失败")
         End Try
-        RunInUi(Sub()
-                    Try
-                        FrmLaunchLeft?.RefreshButtonsUI()
-                    Catch
-                    End Try
-                End Sub)
+        If Killed > 0 Then Thread.Sleep(500)
+        Return Killed
+    End Function
+
+    ''' <summary>
+    ''' 某个整合包的 dsh 是否在跑。
+    ''' 为什么不用 `DshIsRunning`：那个只看内存里的进程引用，引用一丢就永远 False。
+    ''' 这里改用"端口上有 dsh 在应答"这个**与进程引用无关**的证据：
+    '''   · 401 = dsh 在跑且要求 token（正常）
+    '''   · 303 = 带 token 访问被重定向（正常）
+    '''   · 200 = 已带 cookie 的页面
+    ''' 只有 401/303/200 才算 —— 别的程序恰好占着同一个端口时不会给出这些状态。
+    ''' </summary>
+    Public Function DshInstanceIsAlive(Instance As DshInstance) As Boolean
+        If Instance Is Nothing Then Return False
+        '内存引用指向它且进程还活着：最可靠
+        If DshProcessInstance IsNot Nothing AndAlso DshProcessInstance.PathInstance = Instance.PathInstance AndAlso
+           DshCurrentProcess IsNot Nothing AndAlso Not DshCurrentProcess.HasExited Then Return True
+        '回退：端口上有 dsh 在应答
+        Try
+            If DshPortInUse(Instance.Port) Then
+                Dim Code As Integer = DshProbeHttpStatus(Instance.Port)
+                If Code = 401 OrElse Code = 200 OrElse Code = 303 Then Return True
+            End If
+        Catch
+        End Try
+        Return False
+    End Function
+
+    ''' <summary>
+    ''' 尝试把"丢失的进程引用"找回来：按整合包目录 / DSH_HOME 在命令行里匹配 node 进程，
+    ''' 命中就把它记成启动器当前管理的进程。
+    ''' 找不到也没关系 —— 关闭/启动/退出判断都已改为同时看端口（DshInstanceIsAlive）。
+    ''' </summary>
+    Private Sub DshAdoptProcessOfInstance(Instance As DshInstance)
+        If Instance Is Nothing Then Return
+        Try
+            Dim Keys As New List(Of String)
+            Keys.Add(PathUtils.RemoveSlashSuffix(Instance.PathInstance).ToLowerInvariant())
+            If Not String.IsNullOrWhiteSpace(Instance.PathDshHome) Then
+                Keys.Add(PathUtils.RemoveSlashSuffix(Instance.PathDshHome).ToLowerInvariant())
+            End If
+            For Each P As Process In Process.GetProcessesByName("node")
+                Try
+                    Dim Cmd As String = ""
+                    Using S As Management.ManagementObject = New Management.ManagementObject($"Win32_Process.Handle='{P.Id}'")
+                        Cmd = If(TryCast(S("CommandLine"), String), "")
+                    End Using
+                    If Cmd = "" Then Continue For
+                    Dim Lower As String = Cmd.ToLowerInvariant()
+                    '★ 安全红线：绝不碰全局 npm 安装的 dsh（见 DshStopOwnDshProcesses 的说明）
+                    If Lower.Contains("\appdata\roaming\npm\") Then Continue For
+                    If Keys.Any(Function(K) K <> "" AndAlso Lower.Contains(K)) Then
+                        DshCurrentProcess = P
+                        DshProcessInstance = Instance
+                        Logger.Info($"已重新接管整合包 {Instance.Name} 的 dsh 进程（PID {P.Id}）")
+                        Return
+                    End If
+                Catch
+                End Try
+            Next
+        Catch ex As Exception
+            Logger.Warn(ex, "重新接管 dsh 进程失败")
+        End Try
     End Sub
+
+    ''' <summary>
+    ''' 结束"属于某个整合包"的 dsh 进程（不依赖内存里的进程引用）。
+    ''' 匹配顺序：① 命令行里出现该整合包目录；② 命令行里出现该整合包的 DSH_HOME。
+    ''' 命中后走整棵进程树结束（dsh 会派生子进程，只杀外壳会留下孤儿）。
+    ''' </summary>
+    Private Function DshStopProcessesOfInstance(Instance As DshInstance) As Boolean
+        If Instance Is Nothing Then Return False
+        Dim Keys As New List(Of String)
+        Keys.Add(PathUtils.RemoveSlashSuffix(Instance.PathInstance).ToLowerInvariant())
+        If Not String.IsNullOrWhiteSpace(Instance.PathDshHome) Then
+            Keys.Add(PathUtils.RemoveSlashSuffix(Instance.PathDshHome).ToLowerInvariant())
+        End If
+        Dim Killed As Integer = 0
+        Try
+            For Each P As Process In Process.GetProcessesByName("node")
+                Try
+                    Dim Cmd As String = ""
+                    Using S As Management.ManagementObject = New Management.ManagementObject($"Win32_Process.Handle='{P.Id}'")
+                        Cmd = If(TryCast(S("CommandLine"), String), "")
+                    End Using
+                    If Cmd = "" Then Continue For
+                    Dim Lower As String = Cmd.ToLowerInvariant()
+                    '★ 安全红线：绝不碰全局 npm 安装的 dsh（见 DshStopOwnDshProcesses 的说明）
+                    If Lower.Contains("\appdata\roaming\npm\") Then Continue For
+                    If Keys.Any(Function(K) K <> "" AndAlso Lower.Contains(K)) Then
+                        '跳过启动器自己
+                        If P.Id <> Process.GetCurrentProcess().Id Then
+                            DshKillTree(P)
+                            Killed += 1
+                        End If
+                    End If
+                Catch
+                End Try
+            Next
+        Catch ex As Exception
+            Logger.Warn(ex, "按实例查找 dsh 进程失败")
+        End Try
+        If Killed > 0 Then
+            DshLog($"已结束 {Killed} 个属于整合包 {Instance.Name} 的 dsh 进程")
+            Thread.Sleep(500)
+        End If
+        Return Killed > 0
+    End Function
 
     ''' <summary>
     ''' 把启动器记录的"正在运行的 dsh"状态清空。
