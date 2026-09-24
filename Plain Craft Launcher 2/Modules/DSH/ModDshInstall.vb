@@ -229,12 +229,56 @@ Public Module ModDshInstall
 
         Loader.Progress = 0.1
         DshReportStatus("正在下载并安装 dsh（约 500 个包，通常 1~2 分钟）……", 0.1)
-        DshRunNpm(Loader, NpmCmd, Args, Stage,
-                  Sub(P, T)
-                      If T <> "" Then DshReportStatus(T, -1)
-                      If P >= 0 Then Loader.Progress = P
-                  End Sub,
-                  ProgressFrom:=0.12, ProgressTo:=0.88)
+        DshLog($"暂存目录：{Stage}（存在={DirectoryUtils.Exists(Stage)}）")
+        '文件计数看门狗：给出真实的"已写入文件数 / 包总数"并据此推进进度
+        Dim WatchTicks As Integer = 0
+        Dim LastLoggedCount As Integer = -1
+        Dim TotalPkgs As Integer = 0
+        Dim Watcher As New DshInstallFileWatcher(Stage,
+            Sub(Count, Total)
+                WatchTicks += 1
+                If Total > 0 AndAlso TotalPkgs = 0 Then
+                    TotalPkgs = Total
+                    DshLog($"npm 依赖图已就绪：共 {Total} 个包")
+                End If
+                '每约 2 秒记一次日志（400ms 采样一次），便于事后确认看门狗真的在工作
+                If WatchTicks Mod 5 = 0 AndAlso Count <> LastLoggedCount Then
+                    LastLoggedCount = Count
+                    DshLog($"正在写入文件：{Count} 个" & If(TotalPkgs > 0, $"（共 {TotalPkgs} 个包）", ""))
+                End If
+                '进度：实测 npm 是"先把包下到缓存、最后 1~2 阶段才解压提交"，
+                '所以 node_modules 的文件数在下载阶段恒为 1，解压阶段才爆涨。
+                '据此按"已达目标的文件数比例"推进 0.15~0.86；解压前用很慢的时间曲线兜底，
+                '避免进度条在下载阶段完全不动（那段时间本来就无法观测）。
+                Dim Pushed As Double
+                If Count > 8 Then
+                    Dim PerPkg As Double = Math.Max(4.0, Count / Math.Max(1.0, Total))
+                    Dim EstTotalFiles As Double = Math.Max(1.0, PerPkg * Math.Max(Total, 512))
+                    Dim Ratio As Double = Count / EstTotalFiles
+                    Pushed = 0.15 + 0.71 * Math.Min(1.0, Math.Sqrt(Math.Max(0.0, Ratio)))
+                Else
+                    Pushed = 0.15 + 0.05 * Math.Min(1.0, WatchTicks / 75.0)
+                End If
+                If Pushed > Loader.Progress Then Loader.Progress = Pushed
+                DshSetProgressText($"正在写入文件：{Count} 个" & If(TotalPkgs > 0, $"（共 {TotalPkgs} 个包）", ""))
+                '注意：不要在这里改 Loader.Name —— 任务管理卡片只在**创建时**读一次 Name
+                '（PageSpeedLeft 里 Title 用的就是 Loader.Name），刷新循环只更新副标题与控制项。
+                '所以版本号必须在 DshInstallStart 里、启动之前就设好。
+            End Sub,
+            Sub(Count, Total)
+                DshSetProgressText(If(Total > 0, $"已写入 {Count} 个文件（{Total} 个包）", $"已写入 {Count} 个文件"))
+            End Sub)
+        Watcher.StartWatch()
+        Try
+            DshRunNpm(Loader, NpmCmd, Args, Stage,
+                      Sub(P, T)
+                          If T <> "" Then DshReportStatus(T, -1)
+                          If P >= 0 AndAlso P > Loader.Progress Then Loader.Progress = P
+                      End Sub,
+                      ProgressFrom:=0.12, ProgressTo:=0.5)
+        Finally
+            Watcher.RequestStop()
+        End Try
         Loader.Progress = 0.9
 
         '3. 校验
@@ -286,6 +330,101 @@ Public Module ModDshInstall
         Loader.Progress = 1
         DshLog($"dsh {RealVersion} 安装完成")
     End Sub
+
+    ''' <summary>把加载器的名字（也就是任务管理器卡片上显示的标题）改成带版本号的形式。</summary>
+    Private Sub DshSetInstallTaskName(Version As String)
+        Dim NewName As String = $"安装 dsh {Version}"
+        DshVersionInstallLoader.Name = NewName
+        DshVersionInstallTask.Name = NewName
+    End Sub
+
+    ''' <summary>把加载器的名字改成带版本号的形式（任务管理器卡片标题会显示它）。</summary>
+    Private Sub DshSetProgressText(Text As String)
+        DshReportStatus(Text, -1)
+    End Sub
+
+    ''' <summary>
+    ''' npm 安装期间的"文件计数看门狗"。
+    '''
+    ''' 为什么需要（实测结论）：npm 是子进程，既不经过 PCL 的网络栈（所以
+    ''' NetManager.Speed / FileRemain 永远是 0），也不打印机器可读的进度。
+    ''' 实测唯一的真实观测量是 `node_modules` 里已被解压提交的文件数：
+    ''' 前 12 秒（npm 把包下到缓存）为 0，之后 30 秒内从 876 涨到 27538，最终 512 个包。
+    ''' 于是用这个数字做出真实的"已写入多少文件 + 包总数 + 据此推进的百分比"。
+    ''' 注意：**下载速率无法测**（看门狗只看得到解压提交，而 npm 的下载与解压是重叠的），
+    ''' 所以任务管理器左栏的"下载速度 / 剩余文件"仍是 0 —— 这是 npm 架构的限制。
+    ''' </summary>
+    Private Class DshInstallFileWatcher
+        Public ReadOnly Stage As String
+        Public ReadOnly Report As Action(Of Integer, Integer) '已写入文件数, 包总数（0=未知）
+        Public ReadOnly [Done] As Action(Of Integer, Integer)
+        Public LastCount As Integer = 0
+        Public LastTotal As Integer = 0
+        Private _Run As Boolean = True
+        Private _Expected As Integer = 0
+        Public Sub New(Stage As String, Report As Action(Of Integer, Integer), [Done] As Action(Of Integer, Integer))
+            Me.Stage = Stage
+            Me.Report = Report
+            Me.Done = [Done]
+        End Sub
+        Public Sub StartWatch()
+            Dim Th As New Threading.Thread(AddressOf WatchLoop)
+            Th.IsBackground = True
+            Th.Start()
+        End Sub
+        Public Sub RequestStop()
+            _Run = False
+        End Sub
+        Private Sub WatchLoop()
+            Try
+                While _Run
+                    Dim N As Integer = DshCountFiles(Stage)
+                    LastCount = N
+                    '包总数只在 .package-lock.json 出现后读一次（那是 npm 解压阶段开始的标志）
+                    If _Expected = 0 Then _Expected = DshReadExpectedPackageCount(Stage)
+                    LastTotal = _Expected
+                    Report(N, _Expected)
+                    Threading.Thread.Sleep(400)
+                End While
+            Catch
+            End Try
+            Done(LastCount, LastTotal)
+        End Sub
+    End Class
+
+    ''' <summary>
+    ''' 递归统计目录下的文件数（失败时返回已统计到的数量）。
+    ''' 参数顺序注意：DirectoryUtils.EnumerateFiles 是 (folder, includeSubDirectories, searchPattern)，
+    ''' 不是 .NET 的 (path, searchPattern, searchOption) —— 按 .NET 顺序传参会让第三个参数
+    ''' 被隐式转成 Boolean 而抛异常（实机踩过，计数永远返回 0）。
+    ''' 另外这里逐项 Try/Catch：npm 正在往目录里写文件，枚举途中目录可能消失。
+    ''' </summary>
+    Private Function DshCountFiles(Root As String) As Integer
+        Dim Count As Integer = 0
+        Try
+            If Not DirectoryUtils.Exists(Root) Then Return 0
+            For Each F As String In DirectoryUtils.EnumerateFiles(Root, True)
+                Count += 1
+            Next
+        Catch
+        End Try
+        Return Count
+    End Function
+
+    ''' <summary>从 npm 生成的 .package-lock.json 里读出精确的包总数（失败返回 0）。</summary>
+    Private Function DshReadExpectedPackageCount(Stage As String) As Integer
+        Try
+            Dim P As String = Stage & "node_modules\.package-lock.json"
+            If Not FileUtils.Exists(P) Then Return 0
+            Dim J As JObject = JObject.Parse(FileUtils.ReadAsString(P))
+            Dim Pkgs As JToken = J("packages")
+            If Pkgs Is Nothing Then Return 0
+            'packages 里包含根项目自身（""），所以减去 1
+            Return Math.Max(0, Pkgs.Count() - 1)
+        Catch
+            Return 0
+        End Try
+    End Function
 
     ''' <summary>
     ''' 执行一次 npm 命令，实时把输出喂给 Loader 的日志与进度。
@@ -501,6 +640,9 @@ Public Module ModDshInstall
     ''' </summary>
     Public Sub DshInstallStart(Version As String)
         If String.IsNullOrWhiteSpace(Version) Then Throw New Exception("未指定要安装的 dsh 版本")
+        '先改名字，再启动：任务管理器卡片是按加载器名字建的，
+        '名字必须在卡片创建之前就带上版本号（用户反馈"没显示安装哪个版本"）
+        DshSetInstallTaskName(Version)
         DshRequestVersionInstall(Version)
         DshVersionInstallLoader.Start(Nothing, IsForceRestart:=True)
     End Sub

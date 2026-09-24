@@ -5,6 +5,65 @@
 
 ---
 
+## [v0.3.9] — 2026-09-24
+
+### 修复：任务管理器卡片没显示安装的是哪个版本（用户反馈）
+任务卡片的标题**只在创建时读一次 `Loader.Name`**（`PageSpeedLeft` 里 `Title="…Loader.Name…"`），
+之后的刷新循环只更新副标题与控制项。所以「显示哪个版本」必须在 `Start` 之前把 `Loader.Name`
+设成带版本号的形式。现在卡片标题与子任务名都是 `安装 dsh 0.1.7-rc.1`（实测日志确认）。
+
+### 新增：真实的文件计数（用户反馈"没显示剩余文件数量"）
+实测 npm 的可观测行为：
+| 阶段 | `node_modules` 文件数 |
+|---|---|
+| 下载阶段（约 10~30 秒） | npm 把包下到**自己的缓存**，目录里恒为 1 个文件 |
+| 解压阶段（约 20~40 秒） | 1 → 3382 → 19306 → 27455 |
+| 结束时 | `node_modules\.package-lock.json` 的 `packages` 节点数 = 精确包总数（实测 511~512） |
+
+于是加了一个 400ms 采样的文件计数看门狗，每 2 秒把「正在写入文件：N 个（共 M 个包）」写进日志与进度文字，
+并用「文件数 / 估算总文件数」的平方根曲线推进进度（`0.15 + 0.71 × √Ratio`）；
+下载阶段（文件数 ≤ 8）用一条很慢的时间曲线兜底，避免进度条纹丝不动。
+实测日志：
+```
+暂存目录：…\install-0.1.7-rc.1-661657\（存在=True）
+正在写入文件：1 个
+正在写入文件：3382 个
+正在写入文件：19306 个
+正在写入文件：27455 个
+npm 依赖图已就绪：共 511 个包
+```
+
+### 说明：任务管理器左栏的「下载速度」为什么仍然是 0
+`PageSpeedLeft` 里：
+```vb
+LabSpeed.Text = StringUtils.FormatByteSize(NetManager.Speed) & "/s"
+LabFile.Text  = If(NetManager.FileRemain < 0, "0*", NetManager.FileRemain)
+LabThread.Text = NetTaskThreadCount & " / " & NetTaskThreadLimit
+```
+这三项都来自 **PCL 自己的网络栈**（`NetManager` / `NetTaskThreadCount`），
+而 `NetManager.Speed` 是 **ReadOnly**，由 PCL 的 `LoaderDownload` 内部驱动。
+npm 是**子进程**、完全不走 PCL 的下载器，所以这三项在架构上就测不到——
+本版已经给出能测的那一项（已写入文件数），速率与线程数则无法提供，**不做假数据**。
+
+### 顺带修掉一个静默 bug
+`DirectoryUtils.EnumerateFiles` 的参数顺序是 `(folder, includeSubDirectories, searchPattern)`，
+不是 .NET 的 `(path, searchPattern, searchOption)`。我按 .NET 顺序传参（第三个参数给 `SearchOption`），
+被隐式转成 Boolean 抛异常，而外面套了 `Try/Catch` 于是**静默返回 0**——文件计数一直是 0 的根因。
+现在改为显式传 `includeSubDirectories`，并逐项容错（npm 正在写文件，枚举途中可能消失）。
+
+### 变更
+- `ModBase.vb`：版本号 `0.3.8` → `0.3.9`。
+- `ModDshInstall.vb`：新增 `DshSetInstallTaskName`、`DshInstallFileWatcher`、`DshCountFiles`、
+  `DshReadExpectedPackageCount`、`DshSetProgressText`；`DshInstallStart` 先设任务名再启动。
+- `DEVNOTES.md`：新增 4 条（#49 卡片标题只在创建时读 Name、#50 速度为何测不到、
+  #51 npm 真实进度的观测方式、#52 EnumerateFiles 参数顺序坑）。
+
+### 待你在真机确认
+任务管理器卡片标题应显示 `安装 dsh 0.1.7-rc.1`，副标题会随进度更新为
+「正在写入文件：N 个（共 M 个包）」。左栏的下载速度仍是 `0 B/s`（原因见上）。
+
+---
+
 ## [v0.3.8] — 2026-09-24
 
 ### 新增：安装 dsh 接入 PCL 的「任务管理器（后台下载队列）」
