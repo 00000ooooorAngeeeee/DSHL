@@ -5,9 +5,12 @@ Public Class PageSetupLeft
     Private Sub PageSetupLeft_Loaded(sender As Object, e As RoutedEventArgs) Handles Me.Loaded
         'DSH 模式：Minecraft 相关的子页面由 PCL 自己的隐藏开关负责（见 DshApplyModeHideSettings），
         '这里只需要固定选中「DSH 运行环境」。
-        '注意不要在 Loaded 里自己设 ItemLaunch 等的 Visibility —— PageSetupUI.HiddenRefresh()
-        '会按 UiHiddenSetup* 覆盖掉（实机踩过）。
+        '★ 必须直接调 DshApplySetupLeftVisibility()：不能指望 PageSetupUI.HiddenRefresh()，
+        '   因为它开头有 `If Not FrmMain.PanTitleSelect.IsLoaded Then Return`，
+        '   第一次进设置页时那个控件还没 Loaded，整个函数会直接跳过，
+        '   于是左栏会漏出「启动 / 个性化 / 其他」——用户实测到的那条诡异流程就是这个原因。
         If PageLaunchLeft.DshModeEnabled() Then
+            PageSetupUI.DshApplySetupLeftVisibility()
             ItemDsh.SetChecked(True, False, False)
             Return
         End If
@@ -23,8 +26,8 @@ Public Class PageSetupLeft
         IsLoad = True
         '刷新子页面隐藏情况
         PageSetupUI.HiddenRefresh()
-        'DSH 模式兜底：HiddenRefresh 会按 UiHiddenSetup* 重设显隐，所以在它之后再设一次
-        ApplyDshModeVisibility()
+        'DSH 模式兜底：HiddenRefresh 开头有提前返回，可能整段被跳过，所以这里再收一次
+        PageSetupUI.DshApplySetupLeftVisibility()
         '选择第一个未被禁用的子页面
         If IsPageSwitched Then Return
         If Not Settings.Get(Of Boolean)("UiHiddenSetupLaunch") Then
@@ -69,27 +72,6 @@ Public Class PageSetupLeft
         Else
             PageID = FormMain.PageSubType.SetupLaunch
         End If
-    End Sub
-
-    ''' <summary>
-    ''' DSH 模式：把设置页左栏里 Minecraft 相关条目置为 Collapsed。
-    '''
-    ''' 为什么不删元素：FormMain.PageChange 里
-    ''' `CType(FrmSetupLeft.PanItem.Children(SubType), MyListItem)` 是**按下标取控件**的，
-    ''' 删掉元素会让 SetupDsh=4 / SetupManager=5 全部错位（见 DEVNOTES #36）。
-    '''
-    ''' 重要：这个方法必须在 `PageSetupUI.HiddenRefresh()` **之后**调用才会生效——
-    ''' 那个方法会按 UiHiddenSetup* 重新设置同样的四个条目。所以：
-    '''   · 常规做法是写隐藏开关（DshApplyModeHideSettings），让 HiddenRefresh 自己隐藏它们；
-    '''   · 这里作为兜底再设一次，调用点在 Loaded 的末尾（HiddenRefresh 之后）。
-    ''' </summary>
-    Private Sub ApplyDshModeVisibility()
-        If Not PageLaunchLeft.DshModeEnabled() Then Return
-        ItemLaunch.Visibility = Visibility.Collapsed
-        ItemLink.Visibility = Visibility.Collapsed
-        ItemUI.Visibility = Visibility.Collapsed
-        ItemSystem.Visibility = Visibility.Collapsed
-        ItemDsh.Visibility = Visibility.Visible
     End Sub
 
     ''' <summary>

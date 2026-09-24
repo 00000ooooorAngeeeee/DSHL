@@ -425,6 +425,31 @@ Refresh:
     ''' <summary>
     ''' 更新功能隐藏带来的显示变化。
     ''' </summary>
+    ''' <summary>
+    ''' DSH 魔改：按 DSH 模式收紧设置页左栏的显示。
+    '''
+    ''' 单独抽成一个方法而不是只写在 HiddenRefresh 末尾，是因为 HiddenRefresh 开头有一句
+    '''     If FrmMain.PanTitleSelect Is Nothing OrElse Not FrmMain.PanTitleSelect.IsLoaded Then Return
+    ''' —— 第一次进设置页时 PanTitleSelect 往往还没 Loaded，整个函数直接 return，
+    ''' 末尾的规则**根本不会执行**。于是会出现用户实测到的那条诡异现象链：
+    '''     启动 → 设置（左栏漏出 MC 条目，不正常）→ 个性化（规则生效，正常）
+    '''          → 任意页面 → 再进设置（又 return，不正常）
+    ''' 所以这里必须由 PageSetupLeft.Loaded 直接调用一次，不依赖 HiddenRefresh 的时机。
+    ''' </summary>
+    Public Shared Sub DshApplySetupLeftVisibility()
+        Try
+            If Not PageLaunchLeft.DshModeEnabled() Then Return
+            If FrmSetupLeft Is Nothing Then Return
+            FrmSetupLeft.ItemLaunch.Visibility = Visibility.Collapsed
+            FrmSetupLeft.ItemLink.Visibility = Visibility.Collapsed
+            FrmSetupLeft.ItemUI.Visibility = Visibility.Collapsed
+            FrmSetupLeft.ItemSystem.Visibility = Visibility.Collapsed
+            FrmSetupLeft.PanItem.Visibility = Visibility.Collapsed
+        Catch ex As Exception
+            Logger.Warn(ex, "收紧设置页左栏显示失败")
+        End Try
+    End Sub
+
     Public Shared Sub HiddenRefresh() Handles Me.Loaded
         If FrmMain.PanTitleSelect Is Nothing OrElse Not FrmMain.PanTitleSelect.IsLoaded Then Return
         Try
@@ -459,19 +484,10 @@ Refresh:
                 If Not Settings.Get(Of Boolean)("UiHiddenSetupSystem") Then AvaliableCount += 1
                 FrmSetupLeft.PanItem.Visibility = If(AvaliableCount < 2 AndAlso Not HiddenForceShow, Visibility.Collapsed, Visibility.Visible)
                 'DSH 魔改：把上面按 UiHiddenSetup* 算出来的显隐再按 DSH 模式收紧一遍。
-                '为什么必须在这里（实机 bug）：本方法会被多条刷新路径调用，
-                '而"第一次进设置页"与"从别的页面返回设置页"走的路径不同 ——
-                '于是出现"第一次进左栏漏出启动/个性化/其他，返回后才是干净的"这种不一致。
-                '放在这里，任何一次刷新都会把规则重新施加，结果稳定。
-                '（DSH 模式下这四项全部隐藏后，AvaliableCount 会小于 2，PCL 自己就把整个左栏收起来了，
-                '  这正是期望效果：只留右面板的 DSH 运行环境设置。）
-                If PageLaunchLeft.DshModeEnabled() Then
-                    FrmSetupLeft.ItemLaunch.Visibility = Visibility.Collapsed
-                    FrmSetupLeft.ItemLink.Visibility = Visibility.Collapsed
-                    FrmSetupLeft.ItemUI.Visibility = Visibility.Collapsed
-                    FrmSetupLeft.ItemSystem.Visibility = Visibility.Collapsed
-                    FrmSetupLeft.PanItem.Visibility = Visibility.Collapsed
-                End If
+                '注意：光靠这里是不够的 —— 本方法开头的提前返回会让它在"第一次进设置页"时整段跳过，
+                '所以 PageSetupLeft.Loaded 里也会直接调 DshApplySetupLeftVisibility()。
+                '两处都留着：这里负责"改设置项后"的刷新，那边负责"进入页面"的时机。
+                DshApplySetupLeftVisibility()
             End If
             '更多子页面
             Dim OtherAvaliableCount As Integer = 0

@@ -456,6 +456,24 @@ E:\DeepseekHarnessWP\
     用 Tab/Enter 也容易被页面内的可聚焦控件吃掉焦点。
     → 验证界面只能靠"直接启动到目标页面 + 截图/读日志"，需要用户配合操作的地方就别硬凑。
 
+65. **改 PCL 的公共方法前，先看它开头有没有"提前返回"**（这次的关键）：
+    `PageSetupUI.HiddenRefresh()` 第一行是
+        If FrmMain.PanTitleSelect Is Nothing OrElse Not FrmMain.PanTitleSelect.IsLoaded Then Return
+    第一次进设置页时 `PanTitleSelect` 还没 Loaded，于是**整个函数体被跳过**——
+    我把 DSH 规则加在它末尾，结果第一次进设置页根本不执行。
+    用户给出的现象链把这一点暴露得很清楚：
+        启动 → 设置（左栏漏出 MC 条目，不正常）→ 个性化（规则生效，正常）
+            → 任意页面 → 再进设置（又 return，不正常）
+    → 修法：把规则抽成独立的 `DshApplySetupLeftVisibility()`，
+      由 `PageSetupLeft.Loaded` **直接调用**（不依赖 HiddenRefresh 的时机），
+      同时仍保留在 HiddenRefresh 末尾（覆盖"改设置项后"的刷新）。
+    **教训：依赖"某个公共方法一定会跑"之前，先读它开头的守卫条件。**
+
+66. **用户给的现象链比任何日志都好用**：
+    "启动→设置（不正常）→个性化（正常）→任意页面（不正常）"这一串直接定位到了
+    "不同进入路径下同一个方法是否执行"这个差异，比我反复截图猜快得多。
+    **遇到"时好时坏"的 bug，先请用户描述复现路径。**
+
 ---
 
 ## 8b. 本地构建环境搭建记录（v0.3.0 完成）

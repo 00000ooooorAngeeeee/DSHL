@@ -5,7 +5,42 @@
 
 ---
 
-## [v0.4.3] — 2026-09-24
+## [v0.4.4] — 2026-09-24
+
+### 修复：设置页左栏「时好时坏」的真正根因（用户给出的现象链定位到的）
+用户描述的现象链是决定性的：
+```
+启动 → 设置（左栏漏出 启动/个性化/其他，不正常）
+     → 个性化（正常）
+     → 任意页面 → 再进设置（又不正常）
+```
+**根因**：`PageSetupUI.HiddenRefresh()` 的第一行是
+```vb
+If FrmMain.PanTitleSelect Is Nothing OrElse Not FrmMain.PanTitleSelect.IsLoaded Then Return
+```
+第一次进设置页时 `PanTitleSelect` 还没 Loaded，**整个函数体被跳过** —— 我上一版把 DSH 规则加在它末尾，
+所以第一次进设置页根本不执行。点一下「个性化」之后它才 Loaded、规则生效（于是"正常"）；
+再切走后状态又变（于是"又不正常"）。
+
+**修法**：把规则抽成独立的 `Public Shared Sub DshApplySetupLeftVisibility()`，由
+`PageSetupLeft.Loaded` **直接调用**（不依赖 `HiddenRefresh()` 的时机），
+同时仍保留在 `HiddenRefresh()` 末尾以覆盖"改设置项后"的刷新。
+
+**实机确认**（两种进入路径都测了）：
+- 启动器直接落在设置页 → 左栏整块消失，只剩 DSH 内容 ✔
+- 第二次启动（上次停在设置页，等价于"从别的页面进设置"）→ 同样只剩 DSH 内容 ✔
+
+### 教训（记入 DEVNOTES #65/#66）
+- **依赖"某个公共方法一定会跑"之前，先读它开头的守卫条件。**
+- **遇到"时好时坏"的 bug，先请用户描述复现路径** —— 这次比我自己反复截图猜快得多。
+
+### 变更
+- `ModBase.vb`：版本号 `0.4.3` → `0.4.4`。
+- `PageSetupUI.xaml.vb`：新增 `DshApplySetupLeftVisibility()`；`HiddenRefresh()` 末尾改为调用它。
+- `PageSetupLeft.xaml.vb`：`Loaded` 里直接调用它；删除已被取代的自定义 `ApplyDshModeVisibility()`。
+- `DEVNOTES.md`：新增 2 条（#65 公共方法的提前返回要先看、#66 让用户描述复现路径）。
+
+---
 
 ### 修复：两个「首次正常、往返后失效」的隐藏 bug（用户反馈）
 用户报的两条现象，根因是同一个：**「第一次进入」和「从别的页面返回」走的是不同的刷新路径。**
