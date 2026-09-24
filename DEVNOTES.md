@@ -292,6 +292,10 @@ E:\DeepseekHarnessWP\tools\dotnet\dotnet.exe msbuild "Plain Craft Launcher 2\Pla
 
 产物：`Plain Craft Launcher 2\obj\Debug\Plain Craft Launcher 2.exe`（也会复制到 `bin\`）。
 
+> ⚠️ **`restore` 不能省，`obj\` 目录不能删！**
+> net48 引用程序集的路径是 NuGet 写进 `obj\*.nuget.g.props` 的；删掉 `obj` 后直接 build 会重新报 `MSB3644`。
+> 干净重建的正确做法是 `restore` → `msbuild`（或 `dotnet build`，它隐含 restore）。
+
 **这套环境需要四个补丁**（都已写进仓库，前面踩的坑）：
 
 | 补丁 | 位置 | 解决什么 |
