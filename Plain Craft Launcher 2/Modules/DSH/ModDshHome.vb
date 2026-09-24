@@ -67,7 +67,10 @@ Public Module ModDshHome
                 New UTF8Encoding(False))
         End If
         If Not FileUtils.Exists(ProfileDir & "cordis.patch.yml") Then
-            FileUtils.Write(ProfileDir & "cordis.patch.yml", "" & vbCrLf, New UTF8Encoding(False))
+            '重要（实测）：cordis.patch.yml 必须是「顶层 YAML 数组」，空文件或纯注释都会让 dsh 启动直接失败：
+            '  Error: overlay ...\cordis.patch.yml must be a top-level YAML array of loader patch entries
+            '所以空态必须写 []，注释只能放在 [] 上面。
+            FileUtils.Write(ProfileDir & "cordis.patch.yml", DshEmptyPatchText(), New UTF8Encoding(False))
         End If
         If Not FileUtils.Exists(ProfileDir & "pnpm-workspace.yaml") Then
             FileUtils.Write(ProfileDir & "pnpm-workspace.yaml",
@@ -388,23 +391,29 @@ Public Module ModDshHome
         Return ""
     End Function
 
-    ''' <summary>读取 cordis.patch.yml 中所有被 disable 的插件（id → 原因）。</summary>
+    ''' <summary>
+    ''' 读取 cordis.patch.yml 中所有被 disable 的插件（包名 → 原因）。
+    ''' 按"块"解析而非按行：name 与 disabled 可能不在同一行，块之间也可能有别的键。
+    ''' </summary>
     Private Function DshReadDisabledPlugins(Instance As DshInstance) As Dictionary(Of String, String)
         Dim Result As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
         Dim PatchPath As String = DshProfileDir(Instance) & "cordis.patch.yml"
         If Not FileUtils.Exists(PatchPath) Then Return Result
         Try
-            Dim Lines = FileUtils.ReadAsLines(PatchPath)
-            Dim CurrentName As String = Nothing
-            For Each Raw As String In Lines
-                Dim Line As String = Raw.Trim()
-                If Line.StartsWith("-") Then
-                    CurrentName = Nothing
-                ElseIf Line.StartsWith("name:") Then
-                    CurrentName = Line.Substring(5).Trim().Trim(""""c, "'"c)
-                ElseIf Line.StartsWith("disabled:") AndAlso CurrentName IsNot Nothing Then
-                    Dim Value As String = Line.Substring(9).Trim().ToLowerInvariant()
-                    If Value = "true" Then Result(CurrentName) = "在 cordis.patch.yml 中被禁用"
+            For Each Block As String In DshParsePatchBlocks(PatchPath)
+                Dim BlockName As String = Nothing
+                Dim Disabled As Boolean = False
+                For Each Line As String In Block.Split({vbCrLf, vbLf}, StringSplitOptions.RemoveEmptyEntries)
+                    Dim T As String = Line.Trim()
+                    If T.StartsWith("name:") Then
+                        BlockName = T.Substring(5).Trim().Trim(""""c, "'"c)
+                    ElseIf T.StartsWith("disabled:") Then
+                        Dim V As String = T.Substring(9).Trim().ToLowerInvariant()
+                        If V = "true" OrElse V = "yes" OrElse V = "on" OrElse V = "1" Then Disabled = True
+                    End If
+                Next
+                If Disabled AndAlso Not String.IsNullOrWhiteSpace(BlockName) Then
+                    Result(BlockName) = "在 cordis.patch.yml 中被禁用"
                 End If
             Next
         Catch ex As Exception
@@ -434,41 +443,96 @@ Public Module ModDshHome
     End Sub
 
     ''' <summary>
+    ''' cordis.patch.yml 的"空"内容。
+    ''' 必须是合法的顶层 YAML 数组（`[]`），注释写在它上面——
+    ''' 空文件或纯注释都会让 dsh 直接启动失败（实机踩过）。
+    ''' </summary>
+    Public Function DshEmptyPatchText() As String
+        Return "# 本文件由 PCL2-DSH 启动器维护：顶层 YAML 数组形式的 loader patch 列表。" & vbCrLf &
+               "# 关掉插件的条目形如：" & vbCrLf &
+               "#   - id: <插件 id>" & vbCrLf &
+               "#     name: ""@deepseek-ai/xxx""" & vbCrLf &
+               "#     disabled: true" & vbCrLf &
+               "# 空列表必须写成 []，不能留空文件或只有注释。" & vbCrLf &
+               "[]" & vbCrLf
+    End Function
+
+    ''' <summary>按 yaml 条目切分 patch 文件；每个块的文本原样保留。</summary>
+    Private Function DshParsePatchBlocks(PatchPath As String) As List(Of String)
+        Dim Blocks As New List(Of String)
+        If Not FileUtils.Exists(PatchPath) Then Return Blocks
+        Dim Current As New List(Of String)
+        For Each Raw As String In FileUtils.ReadAsLines(PatchPath)
+            Dim Line As String = Raw
+            '忽略文件头部的注释与 []（这些由我们自己重新生成）
+            Dim Trimmed As String = Line.Trim()
+            If Trimmed.StartsWith("- ") OrElse Trimmed.StartsWith("-") AndAlso Trimmed.Length = 1 Then
+                If Current.Count > 0 Then Blocks.Add(Current.Join(vbCrLf))
+                Current = New List(Of String) From {Line}
+            ElseIf Current.Count > 0 Then
+                Current.Add(Line)
+            End If
+        Next
+        If Current.Count > 0 Then Blocks.Add(Current.Join(vbCrLf))
+        Return Blocks
+    End Function
+
+    ''' <summary>判断一个 patch 块是否针对指定包名。</summary>
+    Private Function DshPatchBlockMatches(Block As String, PackageName As String) As Boolean
+        For Each Line As String In Block.Split({vbCrLf, vbLf}, StringSplitOptions.RemoveEmptyEntries)
+            Dim T As String = Line.Trim()
+            If T.StartsWith("name:") Then
+                Dim V As String = T.Substring(5).Trim().Trim(""""c, "'"c)
+                If String.Equals(V, PackageName, StringComparison.OrdinalIgnoreCase) Then Return True
+            End If
+        Next
+        Return False
+    End Function
+
+    ''' <summary>由包名推导 patch 里用的 id。</summary>
+    Private Function DshPluginIdFromPackage(PackageName As String) As String
+        Dim Id As String = If(PackageName, "").Trim()
+        If Id.StartsWith("@") Then
+            Dim Slash As Integer = Id.IndexOf("/"c)
+            If Slash >= 0 Then Id = Id.Substring(Slash + 1)
+        End If
+        If Id.StartsWith("dsh-", StringComparison.OrdinalIgnoreCase) Then Id = Id.Substring(4)
+        Return If(Id, "").Trim()
+    End Function
+
+    ''' <summary>
     ''' 启用/关闭一个插件：在 profile 的 cordis.patch.yml 里加/去一条 disabled 记录。
-    ''' 这是 dsh 官方的 patch 层机制，关闭后插件不会被挂载。
+    ''' 这是 dsh 官方的 patch 层机制，关闭后插件不会被挂载（改完需要重启该整合包的 dsh 才完全生效）。
     ''' </summary>
     Public Sub DshSetPluginEnabled(Instance As DshInstance, Plugin As DshPlugin, Enabled As Boolean)
         If Plugin Is Nothing Then Throw New Exception("未指定插件")
         If Plugin.Enabled = Enabled Then Return
         Dim PatchPath As String = DshProfileDir(Instance) & "cordis.patch.yml"
-        Dim Lines As New List(Of String)
-        If FileUtils.Exists(PatchPath) Then Lines.AddRange(FileUtils.ReadAsLines(PatchPath))
 
-        '移除该插件已有的 patch 块
-        Dim NewLines As New List(Of String)
-        Dim i As Integer = 0
-        While i < Lines.Count
-            Dim Line As String = Lines(i)
-            If Line.Trim() = "- name: """ & Plugin.PackageName & """" OrElse
-               Line.Trim() = "- name: " & Plugin.PackageName Then
-                '跳过这个块（直到下一个顶层 "- " 或文件结束）
-                i += 1
-                While i < Lines.Count AndAlso Not Lines(i).TrimStart().StartsWith("- ")
-                    i += 1
-                End While
-                Continue While
-            End If
-            NewLines.Add(Line)
-            i += 1
-        End While
+        '保留用户自己写的、与本次无关的 patch 块；丢掉本插件已有的记录（避免重复）
+        Dim Kept As New List(Of String)
+        For Each Block As String In DshParsePatchBlocks(PatchPath)
+            If Not DshPatchBlockMatches(Block, Plugin.PackageName) AndAlso Block.Trim() <> "[]" Then Kept.Add(Block)
+        Next
 
         If Not Enabled Then
-            NewLines.Add($"- name: ""{Plugin.PackageName}""")
-            NewLines.Add("  disabled: true")
-            NewLines.Add($"  # 由 PCL2-DSH 启动器关闭于 {Now:yyyy'-'MM'-'dd HH':'mm':'ss}")
+            Dim Id As String = DshPluginIdFromPackage(Plugin.PackageName)
+            Dim Entry As String = $"- id: {Id}" & vbCrLf &
+                                  $"  name: ""{Plugin.PackageName}""" & vbCrLf &
+                                  "  disabled: true" & vbCrLf &
+                                  $"  # 由 PCL2-DSH 启动器关闭于 {Now:yyyy'-'MM'-'dd HH':'mm':'ss}"
+            Kept.Add(Entry)
         End If
 
-        FileUtils.Write(PatchPath, NewLines.Join(vbCrLf) & vbCrLf, NewUTF8())
+        '输出：注释头 + （[] 或全部块）
+        Dim Text As String
+        If Kept.Count = 0 Then
+            Text = DshEmptyPatchText()
+        Else
+            Text = "# 本文件由 PCL2-DSH 启动器维护（顶层 YAML 数组，不能为空文件）。" & vbCrLf &
+                   Kept.Join(vbCrLf) & vbCrLf
+        End If
+        FileUtils.Write(PatchPath, Text, NewUTF8())
         Plugin.Enabled = Enabled
         Plugin.DisabledReason = If(Enabled, "", "在 cordis.patch.yml 中被禁用")
         Logger.Info($"插件 {Plugin.PackageName} 已{(If(Enabled, "启用", "关闭"))}（整合包 {Instance.Name}）")

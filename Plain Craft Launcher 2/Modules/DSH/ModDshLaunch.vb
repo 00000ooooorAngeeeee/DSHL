@@ -51,12 +51,22 @@ Public Module ModDshLaunch
         If Url IsNot Nothing AndAlso DshWebUrl = "" Then DshWebUrl = Url
     End Sub
 
-    ''' <summary>从一行输出里提取 http://127.0.0.1:PORT 形式的地址。</summary>
+    ''' <summary>
+    ''' 从一行输出里提取启动器要打开的那个地址。
+    '''
+    ''' 重要（2026-09-24 实测）：dsh web 启动后会打印
+    '''     dsh web: http://127.0.0.1:3412/?token=8D70xOWT...V2Ss
+    ''' 这个 token 是**唯一鉴权输入**，必须原样带给浏览器，否则：
+    '''     · 不带 token 访问  /            → HTTP 401（用户只会看到一个未授权页）
+    '''     · 带 token 访问    /?token=...  → HTTP 303，换发 cookie 并重定向到干净路径
+    '''     · 带 cookie 再访问 /            → HTTP 200（正常进 GUI）
+    ''' 所以这里必须把 query string 一起抓下来，不能只截到端口号。
+    ''' </summary>
     Private Function DshExtractUrl(Text As String) As String
         Try
             Dim M As System.Text.RegularExpressions.Match =
-                System.Text.RegularExpressions.Regex.Match(Text, "https?://(?:127\.0\.0\.1|localhost|\[::1\]):\d+")
-            If M.Success Then Return M.Value
+                System.Text.RegularExpressions.Regex.Match(Text, "https?://(?:127\.0\.0\.1|localhost|\[::1\]):\d+[^\s""'<>)]*")
+            If M.Success Then Return M.Value.TrimEnd("."c, ","c, ";"c)
         Catch
         End Try
         Return Nothing
@@ -127,11 +137,28 @@ Public Module ModDshLaunch
         Dim Port As Integer = Instance.Port
         If Port <= 0 Then Port = DshDefaultPort
         If DshPortInUse(Port) Then
-            '已有服务占用：如果本启动器没在跑，可能上一次启动器退出后 dsh 仍在运行（这是期望行为）
-            DshLog($"端口 {Port} 已被占用，假定该整合包的服务仍在运行，直接打开浏览器", Loader)
-            Instance.Port = Port
-            If Instance.EffectiveAutoOpenBrowser Then DshOpenBrowser(DshLocalUrl(Port))
-            Return
+            '端口被占用。两种情况：
+            '  (a) 本启动器拉起的进程还在（上面第 0 步已处理，这里不会走到）
+            '  (b) 上一次启动器退出后 dsh 仍在后台跑（这是期望行为）
+            '  (c) 端口被别的程序占了
+            '先探测一下它是不是 dsh：GET / 不带 token 会返回 401（说明是 dsh 且需要鉴权）。
+            Dim ProbeCode As Integer = DshProbeHttpStatus(Port)
+            If ProbeCode = 401 OrElse ProbeCode = 200 OrElse ProbeCode = 303 Then
+                DshLog($"端口 {Port} 上已有 dsh 在运行（HTTP {ProbeCode}）。", Loader)
+                DshLog("注意：dsh 的访问 token 是每个进程独有的，无法由启动器重新拼出来。", Loader)
+                DshLog("如果浏览器提示未授权，请先点「关闭 DSH」再重新启动一次。", Loader)
+                Instance.Port = Port
+                If Instance.EffectiveAutoOpenBrowser Then DshOpenBrowser(DshLocalUrl(Port))
+                RunInUi(Sub() Hint($"端口 {Port} 上已有 dsh 在运行；若提示未授权，请先「关闭 DSH」再启动", HintType.Blue))
+                Return
+            End If
+            '不是 dsh：换一个空闲端口
+            Dim NewPort As Integer = DshFindFreePort(Port + 1)
+            If NewPort <= 0 Then Throw New Exception($"端口 {Port} 被其它程序占用，且找不到可用端口")
+            DshLog($"端口 {Port} 被其它程序占用，改用 {NewPort}", Loader)
+            Port = NewPort
+            Instance.Port = NewPort
+            DshWriteManifest(Instance)
         End If
 
         '3. 工作区
@@ -161,9 +188,10 @@ Public Module ModDshLaunch
         DshProcessInstance = Instance
         Instance.Port = Port
 
-        '6. 等待就绪：优先用输出里的 URL，否则轮询端口
+        '6. 等待就绪：优先等输出里的带 token 地址，其次轮询端口
         Loader.Progress = 0.5
         Dim Deadline As Long = GetTimeMs() + 90 * 1000
+        Dim PortReady As Boolean = False
         Do Until GetTimeMs() > Deadline
             If Loader.State = LoadState.Canceled Then
                 DshLog("启动已取消", Loader)
@@ -172,21 +200,28 @@ Public Module ModDshLaunch
             If Proc.HasExited Then
                 Throw New Exception($"dsh 进程意外退出（退出码 {Proc.ExitCode}）。" & vbCrLf & DshRecentOutput())
             End If
-            If DshWebUrl <> "" OrElse DshPortInUse(Port) Then Exit Do
+            '带 token 的地址是最可靠的"就绪"信号；只有拿不到时才退回端口探测
+            If DshWebUrl <> "" Then Exit Do
+            If Not PortReady Then PortReady = DshPortInUse(Port)
+            '端口通了之后再给输出一点时间（token 行通常紧随其后）
+            If PortReady AndAlso GetTimeMs() > Deadline - 85 * 1000 Then Exit Do
             '进度在 0.5~0.9 之间缓慢推进
             Loader.Progress = Math.Min(0.9, 0.5 + (GetTimeMs() - (Deadline - 90 * 1000)) / 900000.0)
             Thread.Sleep(200)
         Loop
 
-        If DshWebUrl = "" Then DshWebUrl = DshLocalUrl(Port)
-        If Not DshPortInUse(Port) AndAlso DshWebUrl = DshLocalUrl(Port) Then
-            '再给一次机会：有些环境下端口探测会被防火墙拦，按 URL 判断即可
-            DshLog("端口探测未通过，但仍按已输出地址继续", Loader)
-        End If
+        '兜底：没抓到 token 地址时，按端口拼一个干净地址（会 401，但至少让用户看到日志提示）
+        Dim GotTokenUrl As Boolean = DshWebUrl <> ""
+        If Not GotTokenUrl Then DshWebUrl = DshLocalUrl(Port)
+        If Not DshPortInUse(Port) Then DshLog("端口探测未通过，但仍按已推断的地址继续", Loader)
 
         '7. 打开浏览器（需求 1 的核心）
         Loader.Progress = 0.95
         DshLog($"DeepSeekHarness 已就绪：{DshWebUrl}", Loader)
+        If Not GotTokenUrl Then
+            DshLog("⚠ 没能从 dsh 输出里解析出带 ?token= 的地址。dsh 的访问 token 是进程独有的，" &
+                   "直接访问不带 token 的地址会得到 401。请查看下方日志里的原始 `dsh web:` 行。", Loader)
+        End If
         If Instance.EffectiveAutoOpenBrowser Then
             RunInUi(Sub() DshOpenBrowser(DshWebUrl))
         Else

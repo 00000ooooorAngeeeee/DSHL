@@ -5,6 +5,62 @@
 
 ---
 
+## [v0.3.3] — 2026-09-24
+
+**机制级实测**：直接复刻启动器会发出的命令，验证需求 1（自动开浏览器）与需求 4（插件/技能开关）背后的真实机制，
+发现并修掉 2 个会导致功能完全不可用的缺陷。
+
+### 修复
+1. **打开的浏览器地址缺少 `?token=`，用户只会看到 401**（需求 1 的致命缺陷）
+   实测三种访问结果：
+   | 请求 | 结果 |
+   |---|---|
+   | `GET /`（不带 token） | **HTTP 401** |
+   | `GET /?token=XXXX`（首次） | **HTTP 303**，换发 cookie 并重定向到干净路径 |
+   | `GET /`（带 cookie） | **HTTP 200**（正常进 GUI） |
+
+   源码印证：`browserAuth.authenticatedUrl()` 把**进程级** `launchToken` 作为唯一鉴权输入写进 URL
+   （`url.searchParams.set(TOKEN_QUERY, this.launchToken)`），而 `localWebUrl()` 返回的是不带 token 的干净地址。
+   我原来的正则 `https?://127\.0\.0\.1:\d+` 只截到端口号，把 `?token=...` 丢掉了——**点启动必然看到未授权页**。
+   修复：正则补上 `[^\s"'<>)]*` 把 query string 一起抓下来，并调整就绪判定（优先等带 token 的地址，
+   拿到后才开浏览器）；同时区分"端口被占用"的三种情形——用新增的 `DshProbeHttpStatus` 探测，
+   是 dsh（401/303/200）就复用并提示 token 是每进程独有的，不是 dsh 就自动换端口。
+2. **`cordis.patch.yml` 写空文件会让整个 profile 起不来**
+   实测报错：`Error: overlay ...\cordis.patch.yml must be a top-level YAML array of loader patch entries`。
+   我原来的内建 profile 模板往这个文件里写了一个空行，`DshSetPluginEnabled` 清掉最后一条后也会留下纯注释——
+   两种都会让该整合包的 dsh **完全无法启动**。
+   修复：空态统一写 `[]`（注释放在上面），并把插件开关改为**按 YAML 块解析/重建**，保留用户自己写的无关 patch。
+
+### 实证的机制（需求 4 的开关能力已确认可用）
+- **插件开关的 patch 格式被 dsh 正确应用**：写入
+  `- id: plugin-manager` / `name: "@deepseek-ai/dsh-plugin-manager"` / `disabled: true` 后，
+  `--dump-config` 输出变为
+  `# == @deepseek-ai/dsh-base, patched by ...\cordis.patch.yml` + `disabled: true`
+  （原值 `!!js '!ctx.get(''profileContext'')'` 被覆盖）→ **关闭生效**；
+  移除条目后 `disabled` 恢复原值 → **启用生效**；多条 patch 可共存。
+- **技能开关的改名法成立**：技能发现只扫技能根一层、认定 `<root>\<name>\SKILL.md` 且 `<name>` 匹配
+  `/^[a-z0-9]+(?:-[a-z0-9]+)*$/`（按 dsh 源码逐条核对）。等价验证：加 `.disabled~` 前缀后不再被发现，
+  去掉前缀即恢复。（`--dump-config` 看不到技能，技能目录是运行时服务，无法用 dump 验证。）
+
+### 端到端验证记录（沿用 v0.3.2 的环境）
+- `dsh web --host 127.0.0.1 --port 3412 --no-open` 实测启动成功，stdout 输出带 token 的地址。
+- 该实例的 profile 由 `dsh --profile web --dump-config` 正常初始化（4 个文件齐备）。
+
+### 变更
+- `ModDshBase.vb`：新增 `DshProbeHttpStatus`（判断占用端口的是不是 dsh）。
+- `ModDshLaunch.vb`：URL 正则带上 query string；就绪判定与端口占用处理重写；补充 token 相关日志与提示。
+- `ModDshHome.vb`：新增 `DshEmptyPatchText` / `DshParsePatchBlocks` / `DshPatchBlockMatches` /
+  `DshPluginIdFromPackage`；`DshSetPluginEnabled` 改为块级重建；`DshReadDisabledPlugins` 改为块级解析
+  （支持 `true/yes/on/1` 四种真值写法）。
+- `ModBase.vb`：版本号 `0.3.2` → `0.3.3`。
+- `DEVNOTES.md`：新增 3 条避坑记录（#26 token、#27 patch 顶层数组、#28 技能改名法）。
+
+### 仍待验证
+- 在真实 GUI 里点一次「启动 DeepSeekHarness」，确认浏览器打开的是 GUI 而不是 401（机制已实证，差最后一步点按）。
+- 关闭启动器再重启后，对"上次留下的 dsh 仍在跑"这一情形的实际体验。
+
+---
+
 ## [v0.3.2] — 2026-09-24
 
 **端到端跑通「首次引导 → npm 安装 dsh → 新建整合包 → 导入现有 DSH_HOME」全流程**后修掉的 3 个真 bug。

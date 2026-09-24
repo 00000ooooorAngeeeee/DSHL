@@ -350,6 +350,35 @@ Public Module ModDshBase
         Return 0 '交给 dsh 自己分配
     End Function
 
+    ''' <summary>
+    ''' 探测端口上的 HTTP 服务状态码，用于判断"占用这个端口的到底是不是 dsh"。
+    ''' 实测：dsh 的 GET / 不带 token 返回 401、带 token 返回 303，两种都说明是 dsh；
+    ''' 被别的程序占用时会返回别的状态码或直接连不上（返回 0）。
+    ''' </summary>
+    Public Function DshProbeHttpStatus(Port As Integer) As Integer
+        Try
+            Dim Req As Net.HttpWebRequest = CType(Net.WebRequest.Create($"http://127.0.0.1:{Port}/"), Net.HttpWebRequest)
+            Req.Method = "GET"
+            Req.Timeout = 3000
+            Req.AllowAutoRedirect = False
+            Req.UserAgent = $"PCL2-DSH/{VersionBaseName}"
+            Using Resp As Net.HttpWebResponse = CType(Req.GetResponse(), Net.HttpWebResponse)
+                Return CInt(Resp.StatusCode)
+            End Using
+        Catch ex As Net.WebException
+            '401 / 403 之类的状态码会以异常形式抛出，从 ex.Response 里取回来
+            If ex.Response IsNot Nothing Then
+                Try
+                    Return CInt(CType(ex.Response, Net.HttpWebResponse).StatusCode)
+                Catch
+                End Try
+            End If
+            Return 0
+        Catch
+            Return 0
+        End Try
+    End Function
+
 #End Region
 
 #Region "进程环境"
