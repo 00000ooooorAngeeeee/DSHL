@@ -4,7 +4,7 @@
 > 记录**目标、约束、已核实的外部事实、避坑清单、进度**。
 > 改动前请先读 §7 的"工作流程"，并遵守 §8 的"注意事项"。
 
-最后更新：2026-09-24 ・ 启动器版本：`v0.8.13`
+最后更新：2026-09-24 ・ 启动器版本：`v0.8.15`
 
 ---
 
@@ -1038,6 +1038,43 @@ E:\DeepseekHarnessWP\
       遇到"操作是确定性的、但环境收敛是异步的"情况时，
       **要用操作的返回值直接决定 UI 状态，而不是去观察环境的收敛。**
       这与 #111（停止后不等结果）、#113（探测失败要等满超时）是同一条主线的第三次踩坑。**
+
+116. **公开仓库前必须做"许可 + 隐私 + 体积"三项体检 —— 我漏检了一项，被迫改写 git 历史。**
+    用户要求把项目传到 Gitee/GitHub。上传前我做了检查，但**漏掉了一个 2.4 MB 的二进制**，
+    推上去之后才发现，只能用 git filter-branch 从全部历史里剔除再强推。教训分几条：
+
+    (1) 先搞清许可类型，别默认是 GPL。
+    PCL 用的**不是** GPL，而是自定义的《PCL 分发有限许可》+《存储库合理使用指南》
+    （见仓库根的 LICENCE）。它对"重度使用"（基于本存储库修改）有 5 条硬性要求，
+    其中最容易被忽略的是**软件名必须以 "Plain Craft Launcher (PCL)" 开头**并带第三方后缀。
+    -> 合规处理：把 UiLogoText 的默认值从 ""（原版）改成 "PCL DSHL"；
+       README 开头声明第三方性质、署名龙腾猫跃并给赞助链接。
+    （LICENCE 本身一个字都不能改。）
+
+    (2) 检查仓库内容时，Select-String 的 -match 要小心匹配到"路径"而不是"文件名"。
+    我当时的错误写法： git ls-files | Where-Object { $_ -match "最新正式版" }
+    因为 git ls-files 对非 ASCII 文件名会输出**八进制转义**（"\346\234\200..."），
+    正则永远匹配不到，我因此**误判"该文件未被跟踪"**，还在对话里向用户断言了这一点。
+    -> 正确做法：用 git cat-file -t "HEAD:文件名" 直接验证对象是否存在；
+       或 git ls-files -z 取原始字节。**涉及中文文件名时不要靠正则匹配 git 输出。**
+
+    (3) 二进制发布包不该进仓库 —— 尤其当它是"别人的"构建产物。
+    最新正式版.zip 里只有一个 Plain Craft Launcher 2.exe（5.5 MB），
+    是 PCL 官方发布版的可执行文件。它既与本项目无关，又属于"以目标代码形式再分发"，
+    而 PCL 许可要求公开**源代码**。它从**首个提交**起就在历史里，
+    所以 git rm 没用，必须改写历史：
+        git bundle create <备份> --all        # 先做安全网！
+        git filter-branch --force --index-filter "git rm --cached --ignore-unmatch <文件>" --prune-empty --tag-name-filter cat -- --all
+        git reflog expire --expire=now --all && git gc --prune=now --aggressive
+    然后 git push --force + git push --force --tags（42 个标签也一起被改写）。
+    **改写历史前一定要 git bundle create 备份** —— 这是不可逆操作。
+
+    (4) 顺带记一个环境事实：这台机器的 hosts 屏蔽了 GitHub。
+    C:\Windows\System32\drivers\etc\hosts 里有 60+ 条 127.0.0.1 条目
+    （github.com / api.github.com / raw.githubusercontent.com / huggingface.co /
+      Steam、Google、hCaptcha、Epic 等），应该是 Steam++/Watt Toolkit 之类工具写的。
+    -> 所以本项目推到了 Gitee（gitee.com 未被屏蔽，HTTP 200）。
+       以后要推 GitHub 必须先处理这个 hosts 文件。
 
     （另：顺手清掉了 4 处 doc 注释里带尖括号导致的 `BC42304 XML 文档分析错误` 警告，
       集中在 ModDshLaunch.vb / ModDshHome.vb 里写 `<启动器目录>\DSH\`、`<DSH_HOME>` 的地方。
