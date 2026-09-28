@@ -918,7 +918,19 @@ ExitRefresh:
                 Logger.Error(ex, "关闭 DSH 失败")
                 RunInUi(Sub() Hint("关闭 DSH 失败：" & ex.Message, HintType.Red))
             End Try
-            '进程状态变了，强制刷新按钮外观（DshBtnLastKey 里带了 DshIsRunning，会自动重算）
+            '★ 必须等"服务真的不可达"再刷新界面（实机 bug：要连点两次「关闭」才回到状态 1）。
+            '原因：DshStop() 只是发起结束进程，端口不会立刻释放；紧接着刷新时
+            '     DshInstanceIsAlive() 仍探测到端口在应答 → 判定"还在运行"
+            '     → StateKey 没变 → RefreshDshButtonsUI 直接 GoTo ExitRefresh 跳过状态切换
+            '     → 界面停留在状态 2。等一会儿（用户第二次点击时）端口才真的关了。
+            '这里轮询最多约 8 秒，等确实不可达了再刷新，一次点击就能回状态 1。
+            Dim Ins As DshInstance = DshInstanceSelected
+            Dim Deadline As Long = GetTimeMs() + 8000
+            Do While GetTimeMs() < Deadline
+                If Ins Is Nothing OrElse Not DshInstanceIsAlive(Ins) Then Exit Do
+                Thread.Sleep(250)
+            Loop
+            '进程状态变了，强制刷新按钮外观（DshBtnLastKey 里带了存活判定，会自动重算）
             RunInUi(
             Sub()
                 Try
