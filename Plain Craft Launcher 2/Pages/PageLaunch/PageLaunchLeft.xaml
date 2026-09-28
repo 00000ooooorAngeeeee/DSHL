@@ -8,33 +8,41 @@
              d:DesignHeight="417.2" Width="300">
     <!--
     ================================================================================
-    ★★★ 启动页底部按钮区是**已定稿**的形态（v0.8.4 用户确认："达到了我预期的效果"）★★★
+    ★★★ 启动页底部按钮区是**已定稿**的形态（v0.8.6 定稿）★★★
     ================================================================================
-    修改本文件底部区域前请先读完这段，这组数值是量出来的、不是猜的。
+    修改本文件底部区域前请先读完这段。
 
-    ● 用户确认的最终效果：
-        未运行 dsh：  [       启动 DeepSeekHarness       ]   ← 与「整合包管理」同宽同位置
-                      [          整合包管理              ]
-        运行中 dsh：  [   打开 DSH 页面   ] [ 关闭 DSH(红) ]
-                      [          整合包管理              ]
+    ● 定稿形态：**两套独立布局，按 dsh 是否运行切换可见性**
+        （用户建议，实测比"一套布局动态改尺寸"有效得多，见 DEVNOTES #108/#105/#106）
+        状态 1 · dsh 未运行：  [      启动 DeepSeekHarness      ]   整行一个按钮
+                              [          整合包管理           ]
+        状态 2 · dsh 运行中：  [ 打开 DSH 页面 ][ 关闭 DSH(红) ]
+                              [          整合包管理           ]   ← 跨两列，与上面两个按钮同宽
 
-    ● 关键约束（改动其中任何一条都会让宽度/位置对不上）：
-        1. 底部按钮区： HorizontalAlignment="Stretch"  Margin="20,0,10,0"
-        2. BtnVersion ： Width 绑定 BtnLaunch.ActualWidth，且 HorizontalAlignment="Left"
-           —— **绑定方向是"BtnVersion 去适配 BtnLaunch"，不能反过来**。
-              反过来会让底部区被 BtnVersion 的宽度钳死，而底部区内部还要留
-              「关闭 DSH」的 Auto 列 + 10 间距，于是 BtnLaunch 永远比 BtnVersion
-              窄 10 像素（宽差恒为 −10，怎么调都对不上）。见 DEVNOTES #106。
-        3. BtnCloseDsh： 不要写 MinWidth（会把主按钮挤窄，文字被截断，见 #101）
-        4. BtnLaunch  ： 不要加 Margin（会改变它的自适应宽度）
-        5. 底部按钮组的列定义必须是 "* / 10 / Auto"，且保持这个顺序
+    ● 结构（改动前请对照）：
+        · 本文件底部最外层那个 Grid（跨 5 列、Row=2）**只负责挂愚人节动画变换**
+          （AprilScaleTrans / AprilPosTrans 被 ModMain.vb 与 FormMain.xaml.vb 直接引用，
+           必须恰好有一个实例，所以放在包裹两套布局的这一层）
+        · PanState1： Height=54  Margin="20,0,10,0"
+        · PanState2： Height=100 Margin="20,0,10,0"，**2×2 网格**
+            行 0（54） 列 "* / 10 / Auto" → BtnLaunch2(打开) / 间隔 / BtnCloseDsh(红)
+            行 2（35） BtnVersion2 跨 3 列
+          ★ 整包管理宽度 = 上面两个按钮合计宽度，**两边自动对齐，一个绑定都不用**。
+            这就是为什么不要再回去用绑定/手调边距（那三版都没稳定做对）。
 
-    ● 实测数值（窗口 1128 宽、100% 缩放，用 TransformToAncestor 量得）：
-        BtnLaunch  左=46.1  右=306.0  宽=260
-        BtnVersion 左=47.9  右=307.8  宽=260      → 宽差 0，右边差 1.8
+    ● 关键约束：
+        1. BtnCloseDsh **不要写 MinWidth**（会把主按钮挤窄、文字截断，见 #101）
+        2. BtnLaunch / BtnLaunch2 **不要加 Margin**；Padding="30,0,30,15"
+        3. 状态切换只用 DshSetButtonState() 动画透明度，**不动宽高**（#98）
+        4. LabVersion2 的文案**必须短**（用 DshShortVersionText()）：
+           它显示在「打开 DSH 页面」按钮内部，那个按钮只有约 160 逻辑像素宽，
+           减 Padding 30×2 后可用文字宽约 100px。长文案必被截断（#107 同期修的问题）。
+        5. **行为分派不要看按钮文案**（#107，我因此把启动功能改坏过）：
+           LaunchButtonClick 按 DshInstanceSelected / IsVersionInstalled / DshIsRunning 判断。
+        6. 「整合包管理」状态 1 用 BtnVersion、状态 2 用 BtnVersion2，
+           同一时刻**只能显示一个**（否则会出现两个）。
 
-    ● 左栏本身是固定宽 300（见本元素 Width="300"），不随窗口变宽，
-      所以上面这些数值在任意窗口尺寸下都稳定。
+    ● 左栏本身固定宽 300（见本元素 Width="300"），不随窗口变宽。
     ================================================================================
     -->
     <Grid Name="PanInput" RenderTransformOrigin="0.5,0.5">
@@ -55,7 +63,7 @@
         <Grid.RenderTransform>
             <ScaleTransform />
         </Grid.RenderTransform>
-        <local:MyButton Grid.Row="3" Grid.Column="2" x:Name="BtnVersion" Height="35" Margin="0,10,0,0" Text="版本选择" IsEnabled="False" HorizontalAlignment="Left" Width="{Binding ActualWidth, ElementName=BtnLaunch}" />
+        <local:MyButton Grid.Row="3" Grid.Column="2" x:Name="BtnVersion" Height="35" Margin="0,10,10,0" Text="版本选择" IsEnabled="False" />
         <local:MyButton Grid.Row="3" Grid.Column="3" x:Name="BtnMore" Visibility="Collapsed" Height="35" Margin="0,10,10,0" TextPadding="36" Text="版本设置" />
         <!--
             DSH 魔改：把整个登录区（登录页面的宿主容器 PanLogin / 「正版|离线」PanType /
@@ -98,50 +106,78 @@
         </Grid>
         </Grid>
         <!--
-            底部按钮区。
-            DSH 魔改：dsh 运行中时这里是**两个**按钮（打开页面 / 关闭服务）。
-            为什么把 Margin 从按钮挪到这一层 Grid：这样「打开」与「关闭」两个按钮
-            可以共用一个整行的左右边距（各 20），间距也统一由 Grid 的中间那 10 控制；
-            否则两个按钮各自的 Margin 会让总宽对不上原来的单按钮布局。
+            ========================================================================
+            启动页底部：**两套独立布局**（用户建议，v0.8.6 改成这个结构）
+            ========================================================================
+            用户反馈状态 2 有两个问题：
+              · 「打开 DSH 页面」下面的灰色说明文字显示不完整
+              · 「整合包管理」应该左侧对齐蓝色按钮、右侧对齐红色按钮
+            这两个问题用"一套布局 + 动态调宽度/边距"很难同时满足（见 DEVNOTES #106），
+            所以按用户的建议改成**两套布局、按 dsh 是否运行切换**：
+              PanState1 → dsh 未运行：[      启动 DeepSeekHarness      ]  （整行一个）
+              PanState2 → dsh 运行中：[打开 DSH 页面][关闭 DSH] + 下一行 [整合包管理]
+                                     （2×2 网格：整合包管理跨两列，天然与上面两个按钮同宽）
+
+            注意（愚人节动画）：`AprilScaleTrans` / `AprilPosTrans` 被
+            `ModMain.April` 与 `FormMain` 直接引用（见 ModMain.vb 第 680~763 行），
+            所以必须保留一个实例。这里把它放在**包裹两套布局的外层 Grid** 上，
+            这样不管当前显示哪套，愚人节动画都作用在同一处。
         -->
-        <Grid Grid.ColumnSpan="5" Grid.Row="2" Height="54"
-              HorizontalAlignment="Stretch"
-              Margin="20,0,10,0"
-              RenderTransformOrigin="0.5,0.5">
+        <Grid Grid.ColumnSpan="5" Grid.Row="2" RenderTransformOrigin="0.5,0.5">
             <Grid.RenderTransform>
                 <TransformGroup>
                     <ScaleTransform x:Name="AprilScaleTrans" />
                     <TranslateTransform x:Name="AprilPosTrans" />
                 </TransformGroup>
             </Grid.RenderTransform>
+
+            <!-- ============ 状态 1：dsh 未运行 —— 整行一个按钮（保持 v0.8.4 已定稿的样子） ============ -->
+            <Grid x:Name="PanState1" Height="54" Margin="20,0,10,0">
+                <local:MyButton x:Name="BtnLaunch" Text="正在加载" ColorType="Highlight" Padding="30,0,30,15" IsEnabled="False" />
+                <!-- 说明文字：状态 1 下按钮占满整行，所以文字可用宽度就是整行，不会截断 -->
+                <TextBlock x:Name="LabVersion" Text="正在加载版本列表，请稍候" Margin="15,0,15,10"
+                           IsHitTestVisible="False" VerticalAlignment="Bottom" HorizontalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" FontSize="11"
+                           Foreground="{DynamicResource ColorBrushGray3}" RenderTransformOrigin="0.5,-0.2">
+                    <TextBlock.RenderTransform>
+                        <ScaleTransform ScaleX="{Binding RealRenderTransform.ScaleX, ElementName=BtnLaunch, Mode=OneWay}" ScaleY="{Binding RealRenderTransform.ScaleY, ElementName=BtnLaunch, Mode=OneWay}" />
+                    </TextBlock.RenderTransform>
+                </TextBlock>
+            </Grid>
+
             <!--
-                DSH 魔改：dsh 运行中时这里是两个按钮（打开页面 / 关闭服务）。
-                布局用"星号列 + 固定间距列"，**不做宽度动画**，只动画透明度。
-                为什么不做宽度动画（实机踩坑）：关闭按钮是 HorizontalAlignment=Right，
-                即使 Width 从 0 开始动画，它的**布局位置当场就是最终位置**，
-                于是动画中途会和"还没缩够"的启动按钮重叠，文字互相压住。
-                星号列则由布局系统自己按可用宽度分配，任何时刻都不会重叠。
+                ============ 状态 2：dsh 运行中 —— 打开 / 关闭 + 整合包管理 ============
+                2×2 网格：
+                  第 0 行  [ 打开 DSH 页面 (占第0列) ][ 10 ][ 关闭 DSH (占第2列) ]
+                  第 1 行  [        整合包管理 (跨全部 3 列)                 ]
+                `BtnVersion2` 跨列后宽度 = 第0列 + 10 + 第2列，**天然等于上面两个按钮的合计宽度**，
+                所以它的左边缘对齐蓝色按钮、右边缘对齐红色按钮，两边都自动成立，
+                不需要任何绑定或手调边距（这正是用户建议"两套布局"的价值）。
             -->
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="10" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <!-- 固定 Height=54（原来挂在 BtnLaunch 上；现在提到外层 Grid 上，两个按钮都继承） -->
-            <local:MyButton Grid.Column="0" x:Name="BtnLaunch" Text="正在加载" ColorType="Highlight" Padding="30,0,30,15" IsEnabled="False" />
-            <!--
-                dsh 运行中才显示（由 RefreshDshButtonsUI 控制）。
-                默认 Collapsed，不占列宽，所以 DSH 未运行时就是原来的整行单按钮布局。
-                ColorType="Red" —— MyButton 的 ColorState 里有 Red = 2。
-            -->
-            <local:MyButton Grid.Column="2" x:Name="BtnCloseDsh" Text="关闭 DSH" ColorType="Red" Padding="15,0,15,15"
-                            Visibility="Collapsed" Opacity="0"
-                            ToolTip="结束由启动器启动的 DeepSeekHarness 进程" />
-            <TextBlock x:Name="LabVersion" Text="正在加载版本列表，请稍候" Margin="15,0,15,10" IsHitTestVisible="False" VerticalAlignment="Bottom" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{DynamicResource ColorBrushGray3}" RenderTransformOrigin="0.5,-0.2">
-                <TextBlock.RenderTransform>
-                    <ScaleTransform ScaleX="{Binding RealRenderTransform.ScaleX, ElementName=BtnLaunch, Mode=OneWay}" ScaleY="{Binding RealRenderTransform.ScaleY, ElementName=BtnLaunch, Mode=OneWay}" />
-                </TextBlock.RenderTransform>
-            </TextBlock>
+            <Grid x:Name="PanState2" Height="100" Margin="20,0,10,0" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="54" />
+                    <RowDefinition Height="10" />
+                    <RowDefinition Height="35" />
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <!-- 关闭按钮用 Auto 列，按内容自适应宽度（不要写 MinWidth，见 DEVNOTES #101） -->
+                <local:MyButton Grid.Row="0" Grid.Column="2" x:Name="BtnCloseDsh" Text="关闭 DSH" ColorType="Red"
+                                Padding="15,0,15,15" ToolTip="结束由启动器启动的 DeepSeekHarness 进程" />
+                <local:MyButton Grid.Row="0" Grid.Column="0" x:Name="BtnLaunch2" Text="打开 DSH 页面"
+                                ColorType="Highlight" Padding="30,0,30,15" />
+                <!-- 说明文字放在第 0 行、与蓝色按钮同列：宽度就是蓝按钮的宽度，配合缩短后的文案不再截断 -->
+                <TextBlock Grid.Row="0" Grid.Column="0" x:Name="LabVersion2" Text=""
+                           Margin="8,0,8,10" IsHitTestVisible="False" VerticalAlignment="Bottom"
+                           HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" FontSize="11"
+                           Foreground="{DynamicResource ColorBrushGray3}" />
+                <local:MyButton Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" x:Name="BtnVersion2"
+                                Height="35" Text="整合包管理" />
+            </Grid>
         </Grid>
     </Grid>
     <Grid Name="PanLaunching" RenderTransformOrigin="0.5,0.5" Visibility="Collapsed" Opacity="0">

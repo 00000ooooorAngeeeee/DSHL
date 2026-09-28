@@ -636,8 +636,12 @@ Finish:
         FrmMain.PageChange(FormMain.PageType.InstanceSelect)
     End Sub
     '启动按钮
-    Public Sub LaunchButtonClick() Handles BtnLaunch.Click
-        If McLaunchLoader.State = LoadState.Loading OrElse Not BtnLaunch.IsEnabled OrElse
+    Public Sub LaunchButtonClick() Handles BtnLaunch.Click, BtnLaunch2.Click
+        '守卫：页面正在切换时不响应；按钮被禁用时不响应。
+        '注意要**按当前可见的那套布局**取按钮（原版只检查 BtnLaunch，
+        '但状态 2 用的是 BtnLaunch2，只查 BtnLaunch 会漏掉禁用判断）。
+        Dim ActiveBtn As MyButton = If(PanState2.Visibility = Visibility.Visible, BtnLaunch2, BtnLaunch)
+        If McLaunchLoader.State = LoadState.Loading OrElse Not ActiveBtn.IsEnabled OrElse
             (FrmMain.PageRight IsNot Nothing AndAlso FrmMain.PageRight.PageState <> MyPageRight.PageStates.ContentStay AndAlso FrmMain.PageRight.PageState <> MyPageRight.PageStates.ContentEnter) Then Return
         '愚人节处理
         If IsAprilEnabled AndAlso Not IsAprilGiveup Then
@@ -652,28 +656,32 @@ Finish:
         End If
         '实际的启动
         If DshModeEnabled() Then
-            '=== DSH 模式：启动 DeepSeekHarness ===
-            '按钮文案决定行为（与 RefreshDshButtonsUI 的四态保持一致）
-            Select Case BtnLaunch.Text
-                Case "下载 dsh"
-                    FrmMain.PageChange(FormMain.PageType.Download, FormMain.PageSubType.DownloadDsh)
-                    Return
-                Case "新建整合包"
-                    DshNewInstanceWizard()
-                    RefreshButtonsUI()
-                    Return
-                Case "打开 DSH 页面", "打开 DeepSeekHarness"
-                    '服务已在运行，再开一次浏览器即可
-                    '（保留旧文案是为了兼容：万一有别的路径写了老文案也能正常打开）
-                    DshOpenBrowser(If(DshWebUrl <> "", DshWebUrl, DshLocalUrl(DshInstanceSelected.Port)))
-                    Return
-            End Select
+            '=== DSH 模式：启动 / 打开 / 新建 / 下载 ===
+            '
+            '★ 分派依据必须是**真实状态**，不能靠按钮文案（实机踩坑）：
+            '  原来这里是 `Select Case BtnLaunch.Text`，我加第二套布局时改成了
+            '  `Select Case If(BtnLaunch2.Visibility=Visible, BtnLaunch2.Text, BtnLaunch.Text)`，
+            '  那个条件写错了 —— 状态 1（dsh 未运行、按钮写着「启动 DeepSeekHarness」）下
+            '  会走到 "打开 DSH 页面" 分支，于是点「启动」变成"用缓存的地址开浏览器"，
+            '  dsh 根本没启动（用户实测：浏览器打开 127.0.0.1:3081 无法访问）。
+            '  → 改成按 DshIsRunning / 是否已装版本 判断，文案只用于界面显示。
             If DshInstanceSelected Is Nothing Then
-                '兜底：不该走到这里，但别让用户卡住
+                '还没有整合包：按钮表现为「新建整合包」
                 DshNewInstanceWizard()
                 RefreshButtonsUI()
                 Return
             End If
+            If Not DshInstanceSelected.IsVersionInstalled Then
+                '绑定的 dsh 版本还没装：按钮表现为「下载 dsh」
+                FrmMain.PageChange(FormMain.PageType.Download, FormMain.PageSubType.DownloadDsh)
+                Return
+            End If
+            If DshIsRunning Then
+                '已在运行：只开浏览器（带 token 的地址优先）
+                DshOpenBrowser(If(DshWebUrl <> "", DshWebUrl, DshLocalUrl(DshInstanceSelected.Port)))
+                Return
+            End If
+            '其余情况：真正启动 dsh
             DshLaunchStart(DshInstanceSelected)
             Return
         End If
@@ -733,14 +741,14 @@ Finish:
                 BtnLaunch.IsEnabled = False
                 LabVersion.Text = "正在加载整合包列表，请稍候"
                 BtnMore.Visibility = Visibility.Collapsed
-                DshSetCloseButtonVisible(False)
+                DshSetButtonState(False)
             Case 1
                 Logger.Info("启动按钮：还没有任何整合包")
                 BtnLaunch.Text = "新建整合包"
                 BtnLaunch.IsEnabled = True
                 LabVersion.Text = "还没有整合包，点一下新建一个"
                 BtnMore.Visibility = Visibility.Collapsed
-                DshSetCloseButtonVisible(False)
+                DshSetButtonState(False)
             Case 2
                 Logger.Info($"启动按钮：整合包 {Instance.Name} 尚不可启动（{If(Instance.ErrorMessage, "无错误信息")}）")
                 If Not Instance.IsVersionInstalled Then
@@ -753,7 +761,7 @@ Finish:
                 End If
                 BtnLaunch.IsEnabled = True
                 BtnMore.Visibility = Visibility.Collapsed
-                DshSetCloseButtonVisible(False)
+                DshSetButtonState(False)
             Case 3
                 Logger.Info($"启动按钮：整合包 {Instance.Name}（dsh {Instance.DshVersion}）")
                 BtnLaunch.IsEnabled = True
@@ -761,8 +769,11 @@ Finish:
                 BtnLaunch.Text = If(DshIsRunning, "打开 DSH 页面", "启动 DeepSeekHarness")
                 LabVersion.Text = $"{Instance.Name}　·　dsh {Instance.DshVersion}　·　端口 {Instance.Port}"
                 BtnMore.Visibility = Visibility.Visible
-                '运行中才显示「关闭 DSH」（红色）
-                DshSetCloseButtonVisible(DshIsRunning)
+                '运行中切到「状态 2」布局（打开 / 关闭 + 整合包管理），否则用「状态 1」整行单按钮
+                DshSetButtonState(DshIsRunning)
+                '状态 2 用的那个「打开 DSH 页面」按钮要确保可点击（它默认是启用的，
+                '但经历过状态 2→1→2 之后要复位，避免上次被禁用后一直点不动）
+                BtnLaunch2.IsEnabled = True
         End Select
 
         '新建整合包在状态 1 时也允许点击
@@ -770,7 +781,14 @@ Finish:
 
 ExitRefresh:
         '功能隐藏
-        BtnVersion.Visibility = If(Not PageSetupUI.HiddenForceShow AndAlso Settings.Get(Of Boolean)("UiHiddenFunctionSelect"), Visibility.Collapsed, Visibility.Visible)
+        '「整合包管理」有两个入口（两个状态各一个），同一时刻只显示当前状态的那个：
+        '  · 状态 1：底部那个整行按钮 + 下面独立的 BtnVersion（即原来的「版本选择」，DSH 模式下复用为整合包管理）
+        '  · 状态 2：PanState2 里的 BtnVersion2（在「打开/关闭」下方，与它们同宽）
+        '所以状态 2 下要把 BtnVersion 收起来，否则会同时出现两个「整合包管理」。
+        Dim WantFuncBtn As Visibility =
+            If(Not PageSetupUI.HiddenForceShow AndAlso Settings.Get(Of Boolean)("UiHiddenFunctionSelect"), Visibility.Collapsed, Visibility.Visible)
+        If PanState2.Visibility = Visibility.Visible Then WantFuncBtn = Visibility.Collapsed
+        BtnVersion.Visibility = WantFuncBtn
         'DSH 魔改：把「版本选择」复用为「整合包管理」的入口。
         '原因（用户要求）：顶部导航的「更多」页在 DSH 模式下要隐藏，而整合包管理原本挂在
         '「更多」页的左栏里，隐藏后就进不去了。这里改文案 + 直连管理页，入口反而更显眼。
@@ -782,6 +800,9 @@ ExitRefresh:
         '状态 2 时用户往往正需要进去改绑定的 dsh 版本、管理插件/技能，所以这里也要显示。
         '(CurrentState 为 0/1 时下方也不会把它设成可见，所以这里不必额外判空。)
         If CurrentState >= 2 AndAlso CurrentState <= 3 Then BtnMore.Visibility = BtnVersion.Visibility
+        '状态 2 里的「整合包管理」同样受"功能隐藏 → 版本选择"开关控制
+        BtnVersion2.Visibility = If(PageSetupUI.HiddenForceShow OrElse Not Settings.Get(Of Boolean)("UiHiddenFunctionSelect"),
+                                    Visibility.Visible, Visibility.Collapsed)
         'DSH 模式下不需要账号界面：把整个登录区（PanLoginArea）收起来。
         '为什么包一层统一开关、而不是分别设 PanLogin / PanType / PanTypeOne：
         'PCL 会在 RefreshPage 的多条分支里给 PanType 赋 Visibility（例如 UnknownType 分支设成 Visible），
@@ -794,40 +815,70 @@ ExitRefresh:
     Private DshBtnLastKey As String = ""
 
     ''' <summary>
-    ''' 显示/隐藏「关闭 DSH」按钮。
+    ''' 在「状态 1」与「状态 2」两套底部布局之间切换。
     '''
-    ''' 布局说明（为什么只动画透明度、不动宽度）：
-    '''   两个按钮放在同一个 Grid 里，列是「*(启动) / 10(间距) / Auto(关闭)」，
-    '''   关闭按钮 Visible 时自动占住第三列（MinWidth=120），Collapsed 时不占宽度，
-    '''   启动按钮就自动填满剩下的星号列 —— 全程由布局系统算，不需要我们改 Width。
-    '''   **实机踩坑**：第一版用 AaWidth 给两个按钮互相加减宽度，
-    '''   但关闭按钮是 HorizontalAlignment=Right，Width 从 0 动画时它的布局位置
-    '''   当场就是最终位置，于是中途和"还没缩够"的启动按钮重叠、文字互相压住（截图确认过）。
-    '''   现在只动画 Opacity，任何时刻都不会重叠。
+    ''' 状态 1（dsh 未运行）：PanState1 → 整行一个按钮（启动 / 新建整合包 / 下载 dsh）
+    ''' 状态 2（dsh 运行中）：PanState2 → 第 0 行「打开 DSH 页面」+「关闭 DSH」，第 2 行「整合包管理」
+    '''
+    ''' 为什么改成两套布局（用户建议，见 DEVNOTES #107）：
+    '''   状态 2 需要「整合包管理」左边缘对齐蓝按钮、右边缘对齐红按钮。
+    '''   用"一套布局 + 动态调宽度/边距"试了三版都没稳定做对（绑定方向、Auto 列挤压、
+    '''   星号列测量循环……），而 **两套独立布局里状态 2 是 2×2 网格**：
+    '''   「整合包管理」跨全部 3 列，宽度天然等于上面两个按钮的合计宽度，两边自动对齐，
+    '''   一个绑定都不需要。
+    '''
+    ''' 切换只动画透明度，不动宽高 —— 避免动画中途的布局重叠（DEVNOTES #98）。
     ''' </summary>
-    Private Sub DshSetCloseButtonVisible(Visible As Boolean)
-        If Visible = (BtnCloseDsh.Visibility = Visibility.Visible) Then Return
+    Private Sub DshSetButtonState(Running As Boolean)
+        If Running = (PanState2.Visibility = Visibility.Visible) Then Return
         Try
-            AniStop("FrmLaunchLeft DshCloseBtn")
-            If Visible Then
-                BtnCloseDsh.Visibility = Visibility.Visible
-                AniStart({AaOpacity(BtnCloseDsh, 1 - BtnCloseDsh.Opacity, 120)}, "FrmLaunchLeft DshCloseBtn")
-            Else
+            AniStop("FrmLaunchLeft DshBtnState")
+            If Running Then
+                PanState2.Visibility = Visibility.Visible
+                PanState1.Visibility = Visibility.Collapsed
+                LabVersion2.Text = DshShortVersionText()
                 AniStart({
-                    AaOpacity(BtnCloseDsh, -BtnCloseDsh.Opacity, 120),
+                    AaOpacity(PanState2, 1 - PanState2.Opacity, 120),
+                    AaOpacity(PanState1, -PanState1.Opacity, 120)
+                }, "FrmLaunchLeft DshBtnState")
+            Else
+                PanState1.Visibility = Visibility.Visible
+                AniStart({
+                    AaOpacity(PanState1, 1 - PanState1.Opacity, 120),
+                    AaOpacity(PanState2, -PanState2.Opacity, 120),
                     AaCode(Sub()
-                               BtnCloseDsh.Visibility = Visibility.Collapsed
-                               BtnCloseDsh.Opacity = 0
+                               PanState2.Visibility = Visibility.Collapsed
+                               PanState2.Opacity = 0
                            End Sub, 130)
-                }, "FrmLaunchLeft DshCloseBtn")
+                }, "FrmLaunchLeft DshBtnState")
             End If
         Catch ex As Exception
-            Logger.Warn(ex, "切换「关闭 DSH」按钮显示失败")
-            '动画失败也要保证状态正确（直接给终态）
-            BtnCloseDsh.Visibility = If(Visible, Visibility.Visible, Visibility.Collapsed)
-            BtnCloseDsh.Opacity = If(Visible, 1, 0)
+            Logger.Warn(ex, "切换启动页按钮布局失败")
+            '动画失败也要保证状态正确
+            PanState2.Visibility = If(Running, Visibility.Visible, Visibility.Collapsed)
+            PanState1.Visibility = If(Running, Visibility.Collapsed, Visibility.Visible)
+            PanState2.Opacity = If(Running, 1, 0)
+            PanState1.Opacity = If(Running, 0, 1)
         End Try
     End Sub
+
+    ''' <summary>
+    ''' 状态 2 里那行灰色说明文字。
+    ''' **必须短**：它是显示在「打开 DSH 页面」按钮内部的，而那个按钮在双按钮布局下
+    ''' 只有大约 160 逻辑像素宽（左栏整行 260 减去「关闭 DSH」和 10 间距），
+    ''' 再减 Padding 30×2，可用文字宽度只有约 100 像素。
+    ''' 原来那串「My　·　dsh 0.1.7-rc.1　·　端口 3081」约 200 像素，必然被截断
+    ''' （用户截图反馈"灰色文字显示不完整"）。这里压缩成「名字 · 端口」。
+    ''' </summary>
+    Private Function DshShortVersionText() As String
+        Try
+            Dim Ins As DshInstance = DshInstanceSelected
+            If Ins Is Nothing Then Return ""
+            Return $"{Ins.Name}　·　{Ins.Port}"
+        Catch
+            Return ""
+        End Try
+    End Function
 
     ''' <summary>
     ''' 关闭 DSH 服务（红色按钮）。

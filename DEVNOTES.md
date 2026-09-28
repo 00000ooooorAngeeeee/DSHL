@@ -4,7 +4,7 @@
 > 记录**目标、约束、已核实的外部事实、避坑清单、进度**。
 > 改动前请先读 §7 的"工作流程"，并遵守 §8 的"注意事项"。
 
-最后更新：2026-09-24 ・ 启动器版本：`v0.8.5`
+最后更新：2026-09-24 ・ 启动器版本：`v0.8.6`
 
 ---
 
@@ -868,6 +868,41 @@ E:\DeepseekHarnessWP\
       否则它旁边那些 Auto 列（例如可显隐的第二按钮）会把它挤小，而绑定又把这个小值传给对方。
     **另：关闭按钮的 Padding 从 20 降到 15**，让出 10 像素给主按钮（双按钮时更宽裕）。
 
+107. **★★ 不要用"按钮文案"当行为分派依据**（我因此把启动功能改坏了，用户实测发现）。
+    背景：启动页底部按 dsh 是否运行有两套布局，按钮文案也不同
+    （状态 1「启动 DeepSeekHarness」/ 状态 2「打开 DSH 页面」）。
+    原来 `LaunchButtonClick` 是 `Select Case BtnLaunch.Text` 分派的；
+    我加第二套布局时改成
+        Select Case If(BtnLaunch2.Visibility = Visibility.Visible, BtnLaunch2.Text, BtnLaunch.Text)
+    **这个条件写错了** —— 状态 1（按钮写着「启动 DeepSeekHarness」）下也会走到
+    "打开 DSH 页面" 分支，于是点「启动」变成"拿缓存的地址开浏览器"，
+    **dsh 根本没被启动**（用户实测：浏览器打开 127.0.0.1:3081 无法访问）。
+    → 修法：分派依据改成**真实状态**，文案只用于显示：
+        If DshInstanceSelected Is Nothing    → 新建整合包
+        If Not ...IsVersionInstalled         → 去下载页
+        If DshIsRunning                      → 只开浏览器
+        Else                                 → DshLaunchStart()
+    另一个同类坑：守卫条件 `Not BtnLaunch.IsEnabled` 只查了状态 1 的按钮，
+    状态 2 用的是另一个按钮，禁用判断会漏 → 改成按"当前可见的那套布局"取按钮。
+    **通用教训：任何"按显示文案决定行为"的代码都是隐患 ——
+      文案会变、会被本地化、会有多个入口共用同一个处理函数。
+      行为分派必须基于状态/枚举，不能基于界面字符串。**
+
+108. **★ 一个界面有两种差异较大的形态时，用"两套独立布局 + 切换可见性"，别用一套布局动态改尺寸。**
+    （用户建议，实测比我自己折腾三版都有效）
+    启动页底部需要：
+      状态 1（dsh 未运行）：[      启动 DeepSeekHarness      ]  整行一个
+      状态 2（dsh 运行中）  ：[打开 DSH 页面][关闭 DSH] + 下面 [整合包管理]
+    要求「整合包管理」左对齐蓝按钮、右对齐红按钮。
+    我用"一套布局 + 调宽度/绑边距"试了三版都没稳定做对（见 #105/#106）。
+    改成两套布局后，状态 2 用 **2×2 网格**：
+      第 0 行 [打开 DSH 页面(第0列)][10][关闭 DSH(第2列)]
+      第 2 行 [        整合包管理(跨 3 列)              ]
+    → 「整合包管理」宽度天然等于上面两个按钮的合计宽度，两边自动对齐，**一个绑定都不用**。
+    **教训：与其在一套布局里用绑定/边距去"凑"出目标关系，
+      不如把形态差异显式表达成两套结构 —— 让"关系"由布局本身保证。**
+
+
 ---
 
 ## 8b. 本地构建环境搭建记录（v0.3.0 完成）
@@ -972,31 +1007,39 @@ E:\DeepseekHarnessWP\tools\dotnet\dotnet.exe msbuild "Plain Craft Launcher 2\Pla
 这份清单记录**用户明确确认"达到预期"**的界面形态。改这些地方之前请先读对应条目，
 它们都是反复实测定下来的数值，不是随手写的。
 
-A-1. 启动页底部按钮区（v0.8.4 用户确认："非常好，达到了我预期的效果"）
+A-1. 启动页底部按钮区（**v0.8.6 定稿**：改成"两套布局"，用户确认的形态）
      文件：Pages\PageLaunch\PageLaunchLeft.xaml（顶部也有同样的冻结声明）
-     形态：
-        未运行 dsh：  [   启动 DeepSeekHarness   ]      ← 与「整合包管理」同宽同位置
-                      [      整合包管理          ]
-        运行中 dsh：  [ 打开 DSH 页面 ] [ 关闭 DSH(红) ]
-                      [      整合包管理          ]
-     实现要点（改任何一条都会让宽度/位置对不上）：
-       · 底部按钮区： `HorizontalAlignment="Stretch"` + `Margin="20,0,10,0"`
-       · `BtnVersion`： `Width="{Binding ActualWidth, ElementName=BtnLaunch}"`
-                        + `HorizontalAlignment="Left"`
-         ★ **绑定方向必须让 BtnVersion 去适配 BtnLaunch，不能反过来**（DEVNOTES #106）。
-           反过来会让底部区被 BtnVersion 宽度钳死，而底部区内部还要留
-           「关闭 DSH」的 Auto 列 + 10 间距，于是 BtnLaunch 恒比 BtnVersion 窄 10。
-       · `BtnCloseDsh`： 不写 `MinWidth`（DEVNOTES #101，会把主按钮挤窄导致文字截断）
-                          `Padding="15,0,15,15"`、`Visibility=Collapsed`、`Opacity=0`
-       · `BtnLaunch`： 不加 `Margin`；`Padding="30,0,30,15"`
-       · 底部按钮组列定义： `* / 10 / Auto`（顺序不能变）
-       · 「关闭 DSH」的显示/隐藏**只动画透明度**，不动宽度（DEVNOTES #98）
-     实测数值（窗口 1128 宽、100% 缩放，`TransformToAncestor` 量得）：
-        BtnLaunch  左=46.1  右=306.0  宽=260
-        BtnVersion 左=47.9  右=307.8  宽=260      → 宽差 0，右边差 1.8
-     稳定性：左栏是固定宽 300（XAML 根元素 `Width="300"`），不随窗口变宽，
-             所以上述数值在任意窗口尺寸下都成立。
-
+     形态（两套独立布局，按 dsh 是否运行切换可见性）：
+         状态 1 · dsh 未运行：  [      启动 DeepSeekHarness      ]   整行一个按钮
+                                [          整合包管理           ]
+         状态 2 · dsh 运行中：  [ 打开 DSH 页面 ][ 关闭 DSH(红) ]
+                                [          整合包管理           ]   ← 跨两列，与上面两个按钮同宽
+     结构要点：
+       · 外层 Grid（跨 5 列、Row=2）只负责挂 **愚人节动画变换**
+         （`AprilScaleTrans` / `AprilPosTrans` 被 ModMain.vb 与 FormMain.xaml.vb 直接引用，
+          必须恰好有一个实例，所以放在包裹两套布局的这一层）
+       · `PanState1`：`Height=54 Margin="20,0,10,0"`，里面只有 `BtnLaunch` + `LabVersion`
+       · `PanState2`：`Height=100 Margin="20,0,10,0"`，**2×2 网格**：
+           行 0（54）  列 `* / 10 / Auto` → `BtnLaunch2`(打开) / 间隔 / `BtnCloseDsh`(红)
+           行 2（35）  `BtnVersion2` 跨 3 列 → 宽度天然 = 上面两个按钮合计宽度
+         ★ 这就是"整合包管理左对齐蓝按钮、右对齐红按钮"能自动成立的原因 ——
+           **一个绑定都不用**（对比 #105/#106 里用绑定硬凑的三次失败）
+       · `BtnCloseDsh`：**不要写 `MinWidth`**（#101，会把主按钮挤窄导致文字截断）
+         `Padding="15,0,15,15"`
+       · `BtnLaunch` / `BtnLaunch2`：`Padding="30,0,30,15"`，不加 `Margin`
+       · 切换用 `DshSetButtonState(Running)`，**只动画透明度**，不动宽高（#98）
+       · 状态 2 的说明文字用 `LabVersion2`，文案必须短：
+         它是显示在「打开 DSH 页面」按钮内部的，那个按钮只有约 160 逻辑像素宽，
+         减去 `Padding` 30×2 后可用文字宽只有约 100 像素。
+         原来那串「My · dsh 0.1.7-rc.1 · 端口 3081」约 200 像素，必然截断（用户反馈过），
+         现在压成 `DshShortVersionText()` = 「名字 · 端口」（如「My · 3081」）。
+       · 「整合包管理」在状态 1 用 `BtnVersion`（原「版本选择」复用）、
+         状态 2 用 `BtnVersion2`；两者都受"功能隐藏 → 版本选择"开关控制，
+         且**同一时刻只显示一个**（否则会同时出现两个「整合包管理」）。
+       · **行为分派不要看按钮文案**（#107，我因此把启动功能改坏过）：
+         `LaunchButtonClick` 按 `DshInstanceSelected` / `IsVersionInstalled` / `DshIsRunning`
+         判断，文案只用于显示。
+     稳定性：左栏是固定宽 300（XAML 根元素 `Width="300"`），不随窗口变宽。
 A-2. 设置页左栏（v0.5.1 用户确认）
      只保留： **个性化 / DSH 运行环境 / 整合包管理**
      对应固定开关（`ModDshBase.DshApplyModeHideSettings`）：
