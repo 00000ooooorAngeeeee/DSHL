@@ -915,34 +915,40 @@ ExitRefresh:
     ''' </summary>
     Private Sub BtnCloseDsh_Click(sender As Object, e As MouseButtonEventArgs) Handles BtnCloseDsh.Click
         If Not DshModeEnabled() Then Return
-        '已在运行中的 dsh 可能有未保存的会话，先确认一次
+        '已在运行中的 dsh 可能有未保存的会话，先确认一次（**二次确认**）
         If MyMsgBox("是否关闭 DeepSeekHarness 服务？" & vbCrLf &
                     "正在这个 dsh 里进行的对话会被中断。",
                     "关闭 DSH", "关闭", "取消", IsWarn:=True) <> 1 Then Return
-        RunInThread(
+       RunInThread(
         Sub()
+            '★ 这里必须**以"关闭动作是否成功"为准**，不能再靠"轮询到探测为假"。
+            '  我在这上面错了两次，教训记在 DEVNOTES #115：
+            '    · 第一版：杀完立刻刷新 → 探测仍为真（端口还没释放）→ 界面停在状态 2，要点第二次。
+            '    · 第二版：轮询"端口是否还可达"。但进程刚死时会有两件事让探测**继续为真**：
+            '        - 旧连接进入 TIME_WAIT（TCP 立刻"连上"，实测 5ms，不消耗超时）
+            '        - dsh 的 subprocess worker 可能还残活一小会儿，仍回真实的 401
+            '      实测日志：证据①=无进程；证据②=端口True HTTP=401 ← 进程表已空，端口还答 401。
+            '      而 DshInstanceIsAlive 是"进程表 OR 端口"的**混合信号**，
+            '      它在'进程已杀但端口还有残留应答'期间**必然为真** —— 轮询它等于等一个不会变的东西。
+            '  → 现在：DshStop() 返回"是否真的关掉了"（三级兜底里任一命中即为 True），
+            '    只要它为 True，就**立即**把界面切回状态 1（启动器自己的状态已经复位了），
+            '    并作废存活缓存，让后续探测重新开始。这样一次点击必定回到状态 1。
+            Dim StoppedOk As Boolean = False
             Try
-                DshStop()
+                StoppedOk = DshStop()
             Catch ex As Exception
                 Logger.Error(ex, "关闭 DSH 失败")
                 RunInUi(Sub() Hint("关闭 DSH 失败：" & ex.Message, HintType.Red))
             End Try
-            '★ 必须等"服务真的不可达"再刷新界面（实机 bug：要连点两次「关闭」才回到状态 1）。
-            '原因：DshStop() 只是发起结束进程，端口不会立刻释放；紧接着刷新时
-            '     DshInstanceIsAlive() 仍探测到端口在应答 → 判定"还在运行"
-            '     → StateKey 没变 → RefreshDshButtonsUI 直接 GoTo ExitRefresh 跳过状态切换
-            '     → 界面停留在状态 2。等一会儿（用户第二次点击时）端口才真的关了。
-            '这里轮询最多约 8 秒，等确实不可达了再刷新，一次点击就能回状态 1。
-            Dim Ins As DshInstance = DshInstanceSelected
-            Dim Deadline As Long = GetTimeMs() + 8000
-            Do While GetTimeMs() < Deadline
-                If Ins Is Nothing OrElse Not DshInstanceIsAlive(Ins) Then Exit Do
-                Thread.Sleep(250)
-            Loop
-            '进程状态变了，强制刷新按钮外观（DshBtnLastKey 里带了存活判定，会自动重算）
-            RunInUi(
+            '兜底：即使 DshStop 报 False（本来就没进程），也让界面回到状态 1
+           RunInUi(
             Sub()
                 Try
+                    '清掉存活缓存，避免后台探测把界面又拉回"运行中"
+                    DshInvalidateAliveCache()
+                    '若确实关掉了，就把这次的探测结果**直接钉成 False**（不等端口排空），
+                    '这样 RefreshDshButtonsUI 一定走状态 1
+                    If StoppedOk Then DshForceAliveResult(DshInstanceSelected, False)
                     DshBtnLastKey = ""
                     RefreshButtonsUI()
                 Catch ex As Exception

@@ -320,7 +320,7 @@ Public Module ModDshLaunch
     End Sub
 
     ''' <summary>关闭由启动器拉起的 dsh 进程。</summary>
-    Public Sub DshStop(Optional Quiet As Boolean = False)
+    Public Function DshStop(Optional Quiet As Boolean = False) As Boolean
         '不要把守门条件写成"只看 DshIsRunning"（用户实报的 bug）：
         '进程引用可能在别处被清掉（见 DshInstanceIsAlive 的说明），
         '于是出现"状态栏显示运行中、点关闭却报没有进程"的自相矛盾。
@@ -394,7 +394,8 @@ Public Module ModDshLaunch
                 Hint("当前没有由启动器启动的 DeepSeekHarness 进程", HintType.Blue)
             End If
         End If
-    End Sub
+        Return Stopped
+    End Function
 
     ''' <summary>
     ''' 兜底：结束"本启动器自己安装的"dsh 进程（只认 `DshVersionRoot` 下的入口），返回结束个数。
@@ -456,16 +457,63 @@ Public Module ModDshLaunch
     ''' </summary>
     Public Function DshInstanceIsAlive(Instance As DshInstance) As Boolean
         If Instance Is Nothing Then Return False
-        '内存引用指向它且进程还活着：最可靠
-        If DshProcessInstance IsNot Nothing AndAlso DshProcessInstance.PathInstance = Instance.PathInstance AndAlso
-           DshCurrentProcess IsNot Nothing AndAlso Not DshCurrentProcess.HasExited Then Return True
-        '回退：端口上有 dsh 在应答
+        '① 进程表里有它 → 一定在运行（不看端口，避开 TIME_WAIT / 残留应答的误报）
+        If DshInstanceProcessExists(Instance) Then Return True
+        '② 回退：端口上有 dsh 在应答（要求 HTTP 状态码确实是 dsh 的，只看"端口能连上"不够）
         Try
             If DshPortInUse(Instance.Port) Then
                 Dim Code As Integer = DshProbeHttpStatus(Instance.Port)
                 If Code = 401 OrElse Code = 200 OrElse Code = 303 Then Return True
             End If
         Catch
+        End Try
+        Return False
+    End Function
+
+    ''' <summary>
+    ''' 该整合包还有没有活着的 dsh 进程（看进程表，**不碰端口**）。
+    '''
+    ''' ★ 为什么需要这个独立信号（实机踩坑，我在这里错过两次）：
+    '''   "端口能连上"**不能**证明 dsh 还在跑 —— 刚被杀掉的进程留下的连接会进入
+    '''   **TIME_WAIT** 状态，此时 TCP 连接**立刻成功、不消耗超时**，
+    '''   于是 `DshPortInUse` 误报 True。
+    '''   实测证据（点「关闭 DSH」后立刻探测）：
+    '''       [存活诊断] 无缓存，真实探测 结果=True 用时=5ms
+    '''   5ms = "秒连上"，而空闲端口本该等满 150ms 超时；netstat 同时显示 3081 上有
+    '''   十几条 TIME_WAIT —— 可以确认这是误报。
+    '''   这里改为直接看进程表：扫描 node 进程，命令行里含"该整合包目录 或 DSH_HOME"。
+    '''   与端口探测互为**独立双证据**，任一为真即认为在运行（保守，避免漏判运行中）。
+    ''' </summary>
+    Public Function DshInstanceProcessExists(Instance As DshInstance) As Boolean
+        If Instance Is Nothing Then Return False
+        '内存引用最准
+        If DshProcessInstance IsNot Nothing AndAlso DshProcessInstance.PathInstance = Instance.PathInstance AndAlso
+           DshCurrentProcess IsNot Nothing AndAlso Not DshCurrentProcess.HasExited Then Return True
+        Try
+            Dim Keys As New List(Of String)
+            If Not String.IsNullOrWhiteSpace(Instance.PathInstance) Then
+                Keys.Add(PathUtils.RemoveSlashSuffix(Instance.PathInstance).ToLowerInvariant())
+            End If
+            If Not String.IsNullOrWhiteSpace(Instance.PathDshHome) Then
+                Keys.Add(PathUtils.RemoveSlashSuffix(Instance.PathDshHome).ToLowerInvariant())
+            End If
+            If Keys.Count = 0 Then Return False
+            For Each P As Process In Process.GetProcessesByName("node")
+                Try
+                    Dim Cmd As String = ""
+                    Using S As Management.ManagementObject = New Management.ManagementObject($"Win32_Process.Handle='{P.Id}'")
+                        Cmd = If(TryCast(S("CommandLine"), String), "")
+                    End Using
+                    If Cmd = "" Then Continue For
+                    Dim Lower As String = Cmd.Replace("/", "\").ToLowerInvariant()
+                    '安全红线：绝不把"全局 npm 安装的 dsh"算成我们的（见 DshStopOwnDshProcesses）
+                    If Lower.Contains("\appdata\roaming\npm\") Then Continue For
+                    If Keys.Any(Function(K) K <> "" AndAlso Lower.Contains(K)) Then Return True
+                Catch
+                End Try
+            Next
+        Catch ex As Exception
+            Logger.Warn(ex, "扫描整合包 dsh 进程失败")
         End Try
         Return False
     End Function
@@ -488,10 +536,31 @@ Public Module ModDshLaunch
 
     ''' <summary>作废存活缓存（启动/关闭 dsh 之后必须调用，否则界面会短暂显示旧状态）。</summary>
     Public Sub DshInvalidateAliveCache()
-        SyncLock _DshAliveLock
+       SyncLock _DshAliveLock
             _DshAliveCache.Clear()
             _DshAliveStamp.Clear()
         End SyncLock
+    End Sub
+
+    ''' <summary>
+    ''' 把一个"权威结论"钉进存活缓存（有效期很短）。
+    '''
+    ''' ★ 为什么需要（实机 bug：点一次「关闭 DSH」界面不回到状态 1，要点第二次）：
+    '''   刚杀完进程时，`DshInstanceIsAlive` 仍可能为真 —— 它看的是"进程表 OR 端口"，
+    '''   而端口那边有两种残留会让它继续为真：
+    '''     · 旧连接进入 TIME_WAIT（TCP 立刻"连上"，实测 5ms，不消耗超时）
+    '''     · dsh 的 subprocess worker 可能还残活片刻，仍回真实的 401
+    '''   实测日志：`证据①=无进程；证据②=端口True HTTP=401`（进程表已空，端口还答 401）。
+    '''   既然 `DshStop` 已经明确告诉我们"关掉了"，就不该再等端口排空 ——
+    '''   直接把结论钉住，让界面立刻切到状态 1。有效期取缓存周期，之后恢复正常探测。
+    ''' </summary>
+    Public Sub DshForceAliveResult(Instance As DshInstance, Value As Boolean)
+        If Instance Is Nothing Then Return
+        SyncLock _DshAliveLock
+            _DshAliveCache(Instance.PathInstance) = Value
+            _DshAliveStamp(Instance.PathInstance) = GetTimeMs()
+        End SyncLock
+        Logger.Info(String.Format("已按关闭结果锁定存活状态：{0}={1}", Instance.Name, Value))
     End Sub
 
     ''' <summary>
@@ -515,8 +584,8 @@ Public Module ModDshLaunch
 
         If Not HasCache Then
             '首次：只能真实探测一次（超时已压到 150ms，可接受）
-            Cached = DshInstanceIsAlive(Instance)
-            SyncLock _DshAliveLock
+           Cached = DshInstanceIsAlive(Instance)
+           SyncLock _DshAliveLock
                 _DshAliveCache(Key) = Cached
                 _DshAliveStamp(Key) = GetTimeMs()
             End SyncLock
@@ -524,7 +593,7 @@ Public Module ModDshLaunch
         End If
 
         If Stale Then
-            Dim Prev As Boolean = Cached
+           Dim Prev As Boolean = Cached
             Task.Run(
             Sub()
                 Dim Fresh As Boolean = False
@@ -544,7 +613,7 @@ Public Module ModDshLaunch
                 End If
             End Sub)
         End If
-        Return Cached
+       Return Cached
     End Function
 
     ''' <summary>
