@@ -7,6 +7,12 @@ Public Class Settings
     '       DshStopOnExit / DshDefaultVersion / DshDefaultWorkspace / DshInstanceSelected / DshDisableTelemetry
     ' 整合包级（Source:=Sources.Instance）：DshInstanceVersion / DshInstancePort / DshInstanceAutoOpen
     ' 注意：集合初始值设定项的 { } 内部不能出现独占一行的注释，只能写行尾注释，故说明放在这里。
+    '
+    ' ★ UiLogoText 的默认值改成了 "PCL DSHL"（PCL 原版是空字符串）：
+    '   因为 PCL 许可（LICENCE 二.2）要求**软件名必须以 "Plain Craft Launcher (PCL)" 开头**，
+    '   并带一个足以表现"由第三方修改"的后缀。PCL 前缀表明衍生自 Plain Craft Launcher，
+    '   DSHL 后缀表明是第三方（DSH 启动器方向）的修改，不会与官方 PCL 混淆。
+    '   用户仍可在「设置 → 个性化 → 标题栏文字」里自行修改。
     Public Shared ReadOnly Entries As Dictionary(Of String, Setting) = (New List(Of Setting) From {
         New Setting("Identify", "", Source:=Sources.Registry),
         New Setting("WindowHeight", 550),
@@ -150,7 +156,7 @@ Public Class Settings
         New Setting("UiCustomPreset", 0),
         New Setting("UiCustomNet", ""),
         New Setting("UiLogoType", 1, OnChanged:=AddressOf FormMain.UpdateBackgroundAndTitleBar),
-        New Setting("UiLogoText", "", OnChanged:=AddressOf FormMain.UpdateBackgroundAndTitleBar),
+        New Setting("UiLogoText", "PCL DSHL", OnChanged:=AddressOf FormMain.UpdateBackgroundAndTitleBar),
         New Setting("UiLogoLeft", False, OnChanged:=AddressOf FormMain.UpdateBackgroundAndTitleBar),
         New Setting("UiMusicVolume", 500),
         New Setting("UiMusicStop", False),
