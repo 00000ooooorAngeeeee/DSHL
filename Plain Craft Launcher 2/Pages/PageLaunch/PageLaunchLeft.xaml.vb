@@ -640,7 +640,7 @@ Finish:
         '守卫：页面正在切换时不响应；按钮被禁用时不响应。
         '注意要**按当前可见的那套布局**取按钮（原版只检查 BtnLaunch，
         '但状态 2 用的是 BtnLaunch2，只查 BtnLaunch 会漏掉禁用判断）。
-        Dim ActiveBtn As MyButton = If(PanState2.Visibility = Visibility.Visible, BtnLaunch2, BtnLaunch)
+        Dim ActiveBtn As MyButton = If(_DshState2Active, BtnLaunch2, BtnLaunch)
         If McLaunchLoader.State = LoadState.Loading OrElse Not ActiveBtn.IsEnabled OrElse
             (FrmMain.PageRight IsNot Nothing AndAlso FrmMain.PageRight.PageState <> MyPageRight.PageStates.ContentStay AndAlso FrmMain.PageRight.PageState <> MyPageRight.PageStates.ContentEnter) Then Return
         '愚人节处理
@@ -790,9 +790,16 @@ ExitRefresh:
         '  · 状态 1：底部那个整行按钮 + 下面独立的 BtnVersion（即原来的「版本选择」，DSH 模式下复用为整合包管理）
         '  · 状态 2：PanState2 里的 BtnVersion2（在「打开/关闭」下方，与它们同宽）
         '所以状态 2 下要把 BtnVersion 收起来，否则会同时出现两个「整合包管理」。
+        '
+        '★ 判断依据必须是 _DshState2Active 这个**独立字段**，不能看 PanState2.Visibility
+        '  （实机 bug：点「关闭 DSH」回到状态 1 后「整合包管理」不见了）。
+        '  原因：DshSetButtonState(False) 里 PanState2 是**延迟 130ms** 才置为 Collapsed 的
+        '  （留给淡出动画），而本方法紧接着就执行 —— 那一刻 PanState2 还是 Visible，
+        '  于是这里把 BtnVersion 误判成"状态 2 该收起"，收起后再也没有机会恢复。
+        '  教训：不要用"动画中间态的 Visibility"当逻辑判断依据，要用独立的状态标志。
         Dim WantFuncBtn As Visibility =
             If(Not PageSetupUI.HiddenForceShow AndAlso Settings.Get(Of Boolean)("UiHiddenFunctionSelect"), Visibility.Collapsed, Visibility.Visible)
-        If PanState2.Visibility = Visibility.Visible Then WantFuncBtn = Visibility.Collapsed
+        If _DshState2Active Then WantFuncBtn = Visibility.Collapsed
         BtnVersion.Visibility = WantFuncBtn
         'DSH 魔改：把「版本选择」复用为「整合包管理」的入口。
         '原因（用户要求）：顶部导航的「更多」页在 DSH 模式下要隐藏，而整合包管理原本挂在
@@ -818,6 +825,12 @@ ExitRefresh:
         BtnMore.Visibility = Visibility.Collapsed
     End Sub
     Private DshBtnLastKey As String = ""
+    ''' <summary>
+    ''' 当前底部是否处于「状态 2」（dsh 运行中：打开/关闭 + 整合包管理）。
+    ''' ★ 单独用字段记录，不要用 PanState2.Visibility 当判断依据 ——
+    '''   它的收起是**动画延迟 130ms** 才生效的，中间态会让调用方误判（见 ExitRefresh 的说明）。
+    ''' </summary>
+    Private _DshState2Active As Boolean = False
 
     ''' <summary>
     ''' 在「状态 1」与「状态 2」两套底部布局之间切换。
@@ -835,7 +848,8 @@ ExitRefresh:
     ''' 切换只动画透明度，不动宽高 —— 避免动画中途的布局重叠（DEVNOTES #98）。
     ''' </summary>
     Private Sub DshSetButtonState(Running As Boolean)
-        If Running = (PanState2.Visibility = Visibility.Visible) Then Return
+        If Running = _DshState2Active Then Return
+        _DshState2Active = Running
         Try
             AniStop("FrmLaunchLeft DshBtnState")
             If Running Then
