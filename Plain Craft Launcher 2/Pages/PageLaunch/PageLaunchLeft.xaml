@@ -24,7 +24,8 @@
         <Grid.RenderTransform>
             <ScaleTransform />
         </Grid.RenderTransform>
-        <local:MyButton Grid.Row="3" Grid.Column="2" x:Name="BtnVersion" Height="35" Margin="0,10,10,0" Text="版本选择" IsEnabled="False" />
+        <local:MyButton Grid.Row="3" Grid.Column="2" x:Name="BtnVersion" Height="35" Margin="0,10,0,0" Text="版本选择" IsEnabled="False"
+                        HorizontalAlignment="Stretch" />
         <local:MyButton Grid.Row="3" Grid.Column="3" x:Name="BtnMore" Visibility="Collapsed" Height="35" Margin="0,10,10,0" TextPadding="36" Text="版本设置" />
         <!--
             DSH 魔改：把整个登录区（登录页面的宿主容器 PanLogin / 「正版|离线」PanType /
@@ -90,7 +91,37 @@
             退化成按内容宽度排版 → 第一列的星号分不到空间 → 启动按钮被压窄、文字截断。
             显式 Stretch 后，星号列就能拿到剩余宽度。
         -->
-        <Grid Grid.ColumnSpan="5" Grid.Row="2" Height="54" Margin="20,0,30,0" HorizontalAlignment="Stretch" RenderTransformOrigin="0.5,0.5">
+        <!--
+            底部按钮区：**右边缘必须与下面的「整合包管理」(BtnVersion) 对齐**。
+            用户为这个对齐反馈过两次，所以这里把为什么这么写讲清楚。
+
+            实测数据（代码里用 TransformToAncestor 量出来的真实屏幕坐标）：
+              · BtnVersion 在它的单元格里从 x=48.1 开始、宽 270 → 右边缘 318.1
+              · 底部按钮区若只写 Margin="20,0"，会从 x=20 开始 → 右边缘 290
+                → **差 28 像素**（与用户截图里测出的 30 物理像素一致）
+
+            为什么不能用"两个都写 Margin=20 就会齐"的想法：按钮区跨 5 列
+            （ColumnSpan="5"），它的左边距是从**整个网格的左边缘**算的；
+            而 BtnVersion 在 Column 2，它的起点还要加上 Column 0 + Column 1 的宽度。
+            两者起点不同，同样的 Margin 必然不齐。
+
+            → 做法：把按钮区**显式对齐到 BtnVersion 的几何**
+                Width   绑定 BtnVersion.ActualWidth（跟着上面那个按钮的宽度走）
+                Margin  左侧 = BtnVersion 的起点偏移（= Column1 的 20 + 它的实际起点 28），
+                        右侧 = 0（因为宽度已经等于它的宽度）
+              两个绑定一起就把右边缘钉死在同一条线上。
+              下面那两个按钮自己再用 Margin="20,0" 留出左右各 20 的内缩。
+
+            ★ 为什么还要 HorizontalAlignment="Left"：默认 Stretch 会让按钮区的宽度
+            反过来参与外层星号列的计算，形成"列宽取决于内容、内容又取决于列宽"的循环
+            （实测就是这个循环导致 BtnVersion 只有 270 而不是填满整列）。
+            写成 Left + 显式宽度就切断了这个循环。
+        -->
+        <Grid Grid.ColumnSpan="5" Grid.Row="2" Height="54"
+              HorizontalAlignment="Left"
+              Width="270"
+              Margin="32,0,0,0"
+              RenderTransformOrigin="0.5,0.5">
             <Grid.RenderTransform>
                 <TransformGroup>
                     <ScaleTransform x:Name="AprilScaleTrans" />
