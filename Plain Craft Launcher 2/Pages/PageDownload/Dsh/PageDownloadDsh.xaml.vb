@@ -17,30 +17,27 @@ Public Class PageDownloadDsh
         PageLoaderInit(Load, PanLoad, PanContent, Nothing, DshVersionListLoader, AddressOf Load_OnFinish)
         '任务栏登记/清理由模块负责（安装是后台任务，页面可能被切走，见 DshInstallStateChanged）
         DshInstallInit()
-        '把安装任务接到安装进度环上：ShowProgress 依赖 State 才能显示百分比文本
-        LoadInstall.State = DshVersionInstallLoader
         AddHandler DshVersionInstallLoader.OnStateChangedUi, AddressOf InstallStateChanged
-        AddHandler DshInstallStatusChanged, Sub(T) RunInUi(Sub()
-                                                              If PanInstall.Visibility = Visibility.Visible Then LabInstall.Text = T
-                                                          End Sub)
     End Sub
 
     ''' <summary>
-    ''' 安装任务状态变化 → 只负责本页的进度浮层显隐。
-    ''' 任务栏的登记/清理在模块的 DshInstallStateChanged 里做（页面可能被切走）。
+    ''' 安装任务状态变化 → 只负责给提示。
+    '''
+    ''' ★ 原来这里会显示一个**居中的"正在安装 dsh"遮罩浮层**，已按用户要求移除：
+    '''   用户原话"既然右下角有任务管理了，那么中间这个弹窗可以去除了"。
+    '''   进度、取消都已在右下角任务卡片里，居中遮罩属于重复信息，
+    '''   而且它会挡住版本列表，安装时没法继续浏览别的版本。
+    '''   → 现在：进行中完全静默（右下角任务卡片已经说明了），
+    '''           失败才弹一个**非阻塞**的 Hint，保证错误信息不丢。
     ''' </summary>
     Private Sub InstallStateChanged(Loader As LoaderBase, NewState As LoadState, OldState As LoadState)
         Select Case NewState
             Case LoadState.Loading
-                LabInstall.Text = "正在安装 dsh，请稍候……"
-                HintInstall.Visibility = Visibility.Collapsed
-                PanInstall.Visibility = Visibility.Visible
+                '不再显示居中遮罩；右下角任务管理器里有进度与取消
             Case LoadState.Failed
-                HintInstall.Text = "安装失败：" & If(Loader.Error?.GetDisplay(False), "未知错误")
-                HintInstall.Visibility = Visibility.Visible
-                '失败后保留浮层，让用户能看到错误；下次安装会重置
+                Hint("安装 dsh 失败：" & If(Loader.Error?.GetDisplay(False), "未知错误"), HintType.Red)
             Case LoadState.Finished, LoadState.Canceled
-                PanInstall.Visibility = Visibility.Collapsed
+                '无浮层需要收起
         End Select
     End Sub
 
@@ -126,14 +123,12 @@ Public Class PageDownloadDsh
 
 #Region "版本条目操作"
 
-    ''' <summary>取消正在进行的安装。</summary>
-    Private Sub CancelInstall_Click(sender As Object, e As MouseButtonEventArgs)
-        If DshVersionInstallLoader.State = LoadState.Loading Then
-            '取消组合加载器会连带取消子任务，子任务里会 taskkill 掉整棵 npm 进程树
-            DshVersionInstallLoader.Cancel()
-            LabInstall.Text = "正在取消安装……"
-        End If
-    End Sub
+    '★ 原来这里有一个 CancelInstall_Click（取消安装）。
+    '  居中安装浮层被移除后，「取消安装」按钮没有了 —— 用户改从**右下角任务管理器**
+    '  的卡片上取消（那里本来就有取消入口，见 ModDshInstall 的 LoaderTaskbar 登记）。
+    '  所以这个处理器一并删掉，避免留下孤立代码。
+    '  注意：取消组合加载器会连带取消子任务，子任务里会 taskkill 掉整棵 npm 进程树，
+    '  这条逻辑在子任务里，不受本次改动影响。
 
     ''' <summary>
     ''' 为版本条目构造右键菜单（PCL 标准写法：用 XML 生成，再从命名元素上挂事件）。

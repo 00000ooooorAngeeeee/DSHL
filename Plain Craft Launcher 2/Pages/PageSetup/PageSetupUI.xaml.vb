@@ -461,9 +461,6 @@ Refresh:
     End Property
 
     ''' <summary>
-    ''' 更新功能隐藏带来的显示变化。
-    ''' </summary>
-    ''' <summary>
     ''' DSH 魔改：按 DSH 模式收紧设置页左栏的显示。
     '''
     ''' 单独抽成一个方法而不是只写在 HiddenRefresh 末尾，是因为 HiddenRefresh 开头有一句

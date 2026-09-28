@@ -296,14 +296,14 @@ Public Module ModDshHome
 
     ''' <summary>
     ''' 该整合包专属的 pnpm 内容寻址仓库（store）路径。
-    ''' ★ 为什么必须显式指定（实机验证）：pnpm 默认把 store 放在 <DSH_HOME 所在盘>\.pnpm-store，
+    ''' ★ 为什么必须显式指定（实机验证）：pnpm 默认把 store 放在 DSH_HOME 所在盘的 .pnpm-store，
     '''   实测落到了 **E:\DSHarness\.pnpm-store —— 那正是用户全局 DSH 的 store**，
     '''   同一个盘上所有整合包会共用它，直接破坏"整合包之间隔离"这条铁律。
     ''' ★ 怎么指定才有效（三种方式都实测过）：
     '''     ✘ 环境变量 npm_config_store_dir —— pnpm 12 不认，实测仍用全局 store
     '''     ✘ 环境变量 PNPM_STORE_DIR       —— 同样不认
     '''     ✘ 写 profile 的 .npmrc           —— 也不认（pnpm 读的是它自己的配置链）
-    '''     ✔ **命令行 --store-dir** —— 实测生效（生成 <DSH_HOME>\pnpm-store\v11）
+    '''     ✔ **命令行 --store-dir** —— 实测生效（生成 DSH_HOME\pnpm-store\v11）
     '''   所以这里返回路径，由调用方以 `--store-dir` 透传给 pnpm
     '''   （dsh plugin 本来就是把这些参数原样转给 pnpm 的）。
     ''' </summary>

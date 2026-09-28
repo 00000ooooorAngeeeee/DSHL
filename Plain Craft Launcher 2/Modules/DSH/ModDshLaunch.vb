@@ -404,8 +404,8 @@ Public Module ModDshLaunch
     ''' 用户全局安装的 dsh（跑在别的端口）用的是同一个包，命令行里同样有这段路径，
     ''' 于是点「关闭 DSH」把**用户自己的全局 dsh 也杀掉了**（实测日志同时打出两个 PID）。
     ''' → 因此特征必须收紧到"只可能是启动器装的"，即命令行里出现
-    '''   `DshVersionRoot`（启动器自己的版本仓库，默认 `<启动器目录>\DSH\versions\`）或
-    '''   `DshRoot`（启动器自己的数据目录，默认 `<启动器目录>\DSH\`）。
+    '''   DshVersionRoot（启动器自己的版本仓库，默认 启动器目录\DSH\versions\）或
+    '''   DshRoot（启动器自己的数据目录，默认 启动器目录\DSH\）。
     ''' 全局 dsh 的路径形如 `%APPDATA%\npm\node_modules\@deepseek-ai\dsh\...`，
     ''' 既不在版本仓库里也不在启动器的 DSH 目录里，因此**不会**被这条规则命中。
     ''' </summary>
