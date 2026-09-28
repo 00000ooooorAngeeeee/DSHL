@@ -26,15 +26,35 @@ Public Class PageSetupDsh
         AniControlEnabled -= 1
     End Sub
 
-    ''' <summary>刷新状态显示。</summary>
+    ''' <summary>
+    ''' 刷新状态显示。
+    ''' ★ 这里**绝不能**做耗时操作（用户反馈"从启动页切到设置页卡顿约 1 秒"）：
+    '''   原来直接调 `DshNodeVersion()`，它会**起一个子进程**（node --version，
+    '''   实测 200~1000ms），在 UI 线程上执行就是那 1 秒的卡顿。
+    '''   → 改成：有缓存就立即用缓存显示（0ms），没缓存才去后台取并回调。
+    '''   注意本方法是 `Handles Me.Loaded` 的重复加载路径，
+    '''   每次进设置页都会跑，所以更不能用阻塞调用。
+    ''' </summary>
     Public Sub Reload()
         'Node
         Dim Node As String = DshNodeExe
         If Node Is Nothing Then
             LabStatusNode.Text = "❌ 未检测到 Node.js —— 请点击下方的「下载 Node.js」自动安装，或手动填写 node.exe 所在目录。"
         Else
-            Dim Ver As String = DshNodeVersion()
-            LabStatusNode.Text = $"✔ Node.js 可用：{If(Ver, "版本未知")}　（{Node}）"
+            Dim Ver As String = DshNodeVersionCached()
+            If Ver IsNot Nothing Then
+                LabStatusNode.Text = $"✔ Node.js 可用：{Ver}　（{Node}）"
+            Else
+                '缓存里还没有：先给占位，后台取到再更新（不阻塞界面）
+                LabStatusNode.Text = $"✔ Node.js 可用　（{Node}）"
+                DshNodeVersionAsync(
+                    Sub(V As String)
+                        Try
+                            If V IsNot Nothing Then LabStatusNode.Text = $"✔ Node.js 可用：{V}　（{Node}）"
+                        Catch
+                        End Try
+                    End Sub)
+            End If
         End If
 
         'dsh 版本

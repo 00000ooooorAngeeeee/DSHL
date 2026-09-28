@@ -323,7 +323,14 @@ Public Module ModDshBase
         Return DshNodeExe IsNot Nothing
     End Function
 
-    ''' <summary>读取 node.exe 的版本号，如 "v22.23.1"；失败返回 Nothing。</summary>
+    ''' <summary>
+    ''' 读取 node.exe 的版本号，如 "v22.23.1"；失败返回 Nothing。
+    ''' ★ 这个函数会**起一个子进程**（`node --version`，实测 200~1000ms），
+    '''   所以**绝不能在 UI 线程上直接调**（DshRunAndCapture 的注释也写了这一点）——
+    '''   之前设置页 Reload() 直接调它，导致"切到设置页卡顿约 1 秒"（用户反馈）。
+    '''   UI 线程请改用 DshNodeVersionCached()（只读缓存，不阻塞）
+    '''   或 DshNodeVersionAsync()（后台取 + 回调）。
+    ''' </summary>
     Public Function DshNodeVersion() As String
         Dim Exe As String = DshNodeExe
         If Exe Is Nothing Then Return Nothing
@@ -340,6 +347,54 @@ Public Module ModDshBase
             Return Nothing
         End Try
     End Function
+
+    'Node 版本缓存（key = node.exe 路径）。起子进程很贵，一个进程生命周期里读一次就够。
+    Private _DshNodeVersionCache As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
+    Private ReadOnly _DshNodeVersionLock As New Object()
+
+    ''' <summary>
+    ''' 取 Node 版本，**只读缓存、绝不阻塞**（UI 线程可以放心调）。
+    ''' 没有缓存时返回 Nothing，调用方可用 DshNodeVersionAsync() 去后台取。
+    ''' </summary>
+    Public Function DshNodeVersionCached() As String
+        Dim Exe As String = DshNodeExe
+        If Exe Is Nothing Then Return Nothing
+        SyncLock _DshNodeVersionLock
+            If _DshNodeVersionCache.ContainsKey(Exe) Then Return _DshNodeVersionCache(Exe)
+        End SyncLock
+        Return Nothing
+    End Function
+
+    ''' <summary>
+    ''' 后台取 Node 版本并回调（UI 线程调用安全）。
+    ''' 已有缓存时**立即**用缓存回调（不切线程），避免界面先空一下。
+    ''' </summary>
+    Public Sub DshNodeVersionAsync(OnDone As Action(Of String))
+        Dim Exe As String = DshNodeExe
+        If Exe Is Nothing Then
+            If OnDone IsNot Nothing Then OnDone(Nothing)
+            Return
+        End If
+        Dim Cached As String = DshNodeVersionCached()
+        If Cached IsNot Nothing Then
+            If OnDone IsNot Nothing Then OnDone(Cached)
+            Return
+        End If
+        Task.Run(
+        Sub()
+            Dim Ver As String = Nothing
+            Try
+                Ver = DshNodeVersion()
+            Catch
+            End Try
+            If Ver IsNot Nothing Then
+                SyncLock _DshNodeVersionLock
+                    _DshNodeVersionCache(Exe) = Ver
+                End SyncLock
+            End If
+            If OnDone IsNot Nothing Then RunInUi(Sub() OnDone(Ver))
+        End Sub)
+    End Sub
 
     ''' <summary>
     ''' 同步执行一个进程并捕获标准输出。用于短命令（node --version、npm --version 等）。

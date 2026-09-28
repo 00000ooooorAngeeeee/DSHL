@@ -94,19 +94,49 @@ Public Class PageDshManager
                 BtnPluginAdd.IsEnabled = False
                 BtnSkillOpen.IsEnabled = False
             Else
-                Dim Running As Boolean = DshProcessAlive(Instance)
+                '★ 状态先显示"检查中"，**端口探测放后台**（用户反馈"切到整合包管理页卡顿"）。
+                '  原来这里同步调 DshProcessAlive(Instance)，它做"TCP 连接 + HTTP GET 探测"，
+                '  实测阻塞 UI 线程 **488ms**（日志 [性能] DshProcessAlive 488 ms）。
+                '  现在界面立即渲染，"运行中/未运行"与相关按钮可用性等探测回来再更新。
                 LabInstanceInfo.Text =
                     $"名称：{Instance.Name}{vbCrLf}" &
                     $"dsh 版本：{Instance.DshVersion}　（{(If(Instance.IsVersionInstalled, "已安装", "未安装"))}）{vbCrLf}" &
-                    $"端口：{Instance.Port}　状态：{(If(Running, "运行中", "未运行"))}{vbCrLf}" &
+                    $"端口：{Instance.Port}　状态：检查中…{vbCrLf}" &
                     $"DSH_HOME：{Instance.PathDshHome}{vbCrLf}" &
                     $"工作区：{Instance.Workspace}"
-                BtnDelete.IsEnabled = Not Running
+                BtnDelete.IsEnabled = False
                 BtnOpenFolder.IsEnabled = True
                 BtnLaunch.IsEnabled = Instance.CanLaunch
-                BtnStop.IsEnabled = Running
+                BtnStop.IsEnabled = False
                 BtnPluginAdd.IsEnabled = Instance.IsVersionInstalled
                 BtnSkillOpen.IsEnabled = True
+                Dim Checked As DshInstance = Instance
+                Task.Run(
+                Sub()
+                    Dim IsUp As Boolean = False
+                    Try
+                        IsUp = DshProcessAlive(Checked)
+                    Catch ex As Exception
+                        Logger.Warn(ex, "探测 dsh 运行状态失败")
+                    End Try
+                    RunInUi(
+                    Sub()
+                        Try
+                            '期间用户可能已切到别的整合包，确认还是同一个再更新
+                            If Instance Is Nothing OrElse Instance.PathInstance <> Checked.PathInstance Then Return
+                            LabInstanceInfo.Text =
+                                $"名称：{Checked.Name}{vbCrLf}" &
+                                $"dsh 版本：{Checked.DshVersion}　（{(If(Checked.IsVersionInstalled, "已安装", "未安装"))}）{vbCrLf}" &
+                                $"端口：{Checked.Port}　状态：{(If(IsUp, "运行中", "未运行"))}{vbCrLf}" &
+                                $"DSH_HOME：{Checked.PathDshHome}{vbCrLf}" &
+                                $"工作区：{Checked.Workspace}"
+                            BtnDelete.IsEnabled = Not IsUp
+                            BtnStop.IsEnabled = IsUp
+                        Catch ex As Exception
+                            Logger.Warn(ex, "更新 dsh 运行状态失败")
+                        End Try
+                    End Sub)
+                End Sub)
             End If
 
             LoadPlugins()
