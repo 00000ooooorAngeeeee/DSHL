@@ -4,7 +4,7 @@
 > 记录**目标、约束、已核实的外部事实、避坑清单、进度**。
 > 改动前请先读 §7 的"工作流程"，并遵守 §8 的"注意事项"。
 
-最后更新：2026-09-24 ・ 启动器版本：`v0.8.3`
+最后更新：2026-09-24 ・ 启动器版本：`v0.8.4`
 
 ---
 
@@ -850,6 +850,23 @@ E:\DeepseekHarnessWP\
     **教训：涉及星号列/跨列的布局，别用算术推；要"切断循环 + 用代码量真实坐标 + 小步微调"。
       另外：`Width="{Binding ActualWidth, ElementName=X}"` 在 X 自己也在同一测量过程中时
       会造成循环依赖，反而更糟。**
+
+106. **★★ 对齐两个按钮时，如果其中一个旁边还有"会显隐的其他控件"，绑定方向决定了成败。**
+    （用户为"上按钮比下按钮窄"反馈了三次，我前两次的方向都错了。）
+    最终量出来的数据（`TransformToAncestor(FrmMain)` 真实坐标）：
+        正确解：BtnLaunch 宽 260 / BtnVersion 宽 260 → **宽差 0**，右边差 1.8
+    **错误方向**（我前两次做的）：让底部按钮区去"适配" BtnVersion
+        `底部.Width = {Binding BtnVersion.ActualWidth}`
+      → 底部区宽度被 BtnVersion 钳死，而它内部还要留出「关闭 DSH」的 Auto 列 + 10 间距
+      → `BtnLaunch` 只能拿到 260，永远比 BtnVersion 少 10（宽差恒为 −10）。
+    **正确方向**：让 BtnVersion 去"适配"底部按钮区
+        `BtnVersion.Width = {Binding BtnLaunch.ActualWidth}` + `HorizontalAlignment="Left"`
+        底部按钮区 `HorizontalAlignment="Stretch"` + `Margin="20,0,10,0"`
+      → 底部区先按可用宽度定下来，BtnLaunch 拿到 260，BtnVersion 再照抄这 260。
+    **为什么方向这么关键**：`Width` 绑定是单向的，绑定端会**放弃自己的自适应**去迁就对方。
+      要"内容需要多少就多少"的那个元素必须放在**被绑定源**一侧，
+      否则它旁边那些 Auto 列（例如可显隐的第二按钮）会把它挤小，而绑定又把这个小值传给对方。
+    **另：关闭按钮的 Padding 从 20 降到 15**，让出 10 像素给主按钮（双按钮时更宽裕）。
 
 ---
 

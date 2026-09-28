@@ -5,7 +5,52 @@
 
 ---
 
-## [v0.8.3] — 2026-09-24
+## [v0.8.4] — 2026-09-24
+
+### 修复：上按钮比下按钮窄（**用户第三次反馈，这次真正修好了**）
+用户明确指出"不是位置问题，是上面按钮宽度比下面按钮小"，并给了截图。
+实测确认：`BtnLaunch` 宽 260，`BtnVersion` 宽 270 —— **宽差 10，而且恒定为 −10**。
+
+### 我前两次为什么没修对：绑定方向反了
+我前两次都是让**底部按钮区去适配** `BtnVersion`：
+```xml
+底部.Width = "{Binding ActualWidth, ElementName=BtnVersion}"
+```
+但底部区内部还要留出「关闭 DSH」的 `Auto` 列 + 10 间距，
+所以 `BtnLaunch` 永远只能拿到 `BtnVersion.Width − 10` —— **宽差恒为 −10，怎么调都对不上**。
+
+### 正确做法：把绑定反过来
+```xml
+BtnVersion.Width = "{Binding ActualWidth, ElementName=BtnLaunch}"   HorizontalAlignment="Left"
+底部按钮区        HorizontalAlignment="Stretch"   Margin="20,0,10,0"
+```
+底部按钮区先按可用宽度把 `BtnLaunch` 定到 260，`BtnVersion` 再照抄这 260。
+
+**最终实测**：
+```
+BtnLaunch  左=46.1  右=306.0  宽=260
+BtnVersion 左=47.9  右=307.8  宽=260
+                              宽差 = 0   右边差 = 1.8 ✔
+```
+
+> 顺带解决了 v0.8.2/v0.8.3 里"我越改越坏"的问题：那两版我改动了 `ColumnSpan`，
+> 结果连左边缘都差了 30 像素。这一版**先把 XAML 回退到 v0.8.0 的已知可用状态**，
+> 再在正确结构上做有依据的改动，所以文字完整、双按钮正常、宽度一致三者同时成立。
+> 关闭按钮的 `Padding` 也从 20 降到 15，让出 10 像素给主按钮。
+
+### 教训（DEVNOTES #106）
+**`Width` 绑定是单向的，绑定端会放弃自己的自适应去迁就对方。**
+要"内容需要多少就多少"的那个元素必须放在**被绑定源**一侧；
+否则它旁边那些 Auto 列（例如可显隐的第二按钮）会把它挤小，而绑定又把这个小值传给对方。
+
+### 变更
+- `PageLaunchLeft.xaml`：从 v0.8.0 恢复底部按钮区结构，改 `Stretch` + `Margin="20,0,10,0"`；
+  `BtnVersion` 反向绑定 `BtnLaunch.ActualWidth` 且 `HorizontalAlignment="Left"`；
+  关闭按钮 `Padding` 20→15。底部按钮组补上列定义（`*/10/Auto`）。
+- `ModBase.vb`：版本号 `0.8.3` → `0.8.4`。
+- `DEVNOTES.md`：新增 #106（绑定的方向决定成败）。
+
+---
 
 ### 修复：右边缘对齐（**这才是真正修好的那一版**，前两次都没修对）
 用户截图再次指出"右侧边缘还是没对齐"。这次我改用**代码量真实坐标**定位，
