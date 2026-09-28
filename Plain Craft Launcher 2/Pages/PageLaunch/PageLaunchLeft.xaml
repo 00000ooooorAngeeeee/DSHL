@@ -19,6 +19,14 @@
         状态 2 · dsh 运行中：  [ 打开 DSH 页面 ][ 关闭 DSH(红) ]
                               [          整合包管理           ]   ← 跨两列，与上面两个按钮同宽
 
+    ● ★★★ 状态 1 的对齐靠三处属性，**删掉任何一处都会破坏对齐**（我犯过这个错）★★★
+        `BtnVersion`（下面 `<Grid.Row="3" Grid.Column="2">` 那个）必须是：
+            Margin="0,10,0,0"                                      ← 右边距 0（不是 10）
+            HorizontalAlignment="Left"
+            Width="{Binding ActualWidth, ElementName=BtnLaunch}"   ← 绑定方向不能反（#106）
+        它绑的 `BtnLaunch` 在 `PanState1` 里（本文件内唯一名为 BtnLaunch 的元素）。
+        实测（状态 1）：BtnLaunch 宽 270 / BtnVersion 宽 270 → **宽差 0**。
+
     ● 结构（改动前请对照）：
         · 本文件底部最外层那个 Grid（跨 5 列、Row=2）**只负责挂愚人节动画变换**
           （AprilScaleTrans / AprilPosTrans 被 ModMain.vb 与 FormMain.xaml.vb 直接引用，
@@ -27,8 +35,7 @@
         · PanState2： Height=100 Margin="20,0,10,0"，**2×2 网格**
             行 0（54） 列 "* / 10 / Auto" → BtnLaunch2(打开) / 间隔 / BtnCloseDsh(红)
             行 2（35） BtnVersion2 跨 3 列
-          ★ 整包管理宽度 = 上面两个按钮合计宽度，**两边自动对齐，一个绑定都不用**。
-            这就是为什么不要再回去用绑定/手调边距（那三版都没稳定做对）。
+          ★ 状态 2 的整合包管理宽度 = 上面两个按钮合计宽度，**两边自动对齐，一个绑定都不用**。
 
     ● 关键约束：
         1. BtnCloseDsh **不要写 MinWidth**（会把主按钮挤窄、文字截断，见 #101）
@@ -63,7 +70,15 @@
         <Grid.RenderTransform>
             <ScaleTransform />
         </Grid.RenderTransform>
-        <local:MyButton Grid.Row="3" Grid.Column="2" x:Name="BtnVersion" Height="35" Margin="0,10,10,0" Text="版本选择" IsEnabled="False" />
+        <!--
+            ★ 这三处属性是 v0.8.4 定稿的，不要改（我之前为了新结构把它们删掉，破坏了状态 1 的对齐）：
+                Margin="0,10,0,0"                     右 0（不是 10）
+                HorizontalAlignment="Left"            不拉伸
+                Width="{Binding ActualWidth, ElementName=BtnLaunch}"
+                  绑定方向必须是"BtnVersion 去适配 BtnLaunch"，不能反过来（DEVNOTES #106）
+        -->
+        <local:MyButton Grid.Row="3" Grid.Column="2" x:Name="BtnVersion" Height="35" Margin="0,10,0,0" Text="版本选择" IsEnabled="False"
+                        HorizontalAlignment="Left" Width="{Binding ActualWidth, ElementName=BtnLaunch}" />
         <local:MyButton Grid.Row="3" Grid.Column="3" x:Name="BtnMore" Visibility="Collapsed" Height="35" Margin="0,10,10,0" TextPadding="36" Text="版本设置" />
         <!--
             DSH 魔改：把整个登录区（登录页面的宿主容器 PanLogin / 「正版|离线」PanType /

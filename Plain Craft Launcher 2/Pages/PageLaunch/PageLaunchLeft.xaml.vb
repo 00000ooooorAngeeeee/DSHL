@@ -664,7 +664,7 @@ Finish:
             '  那个条件写错了 —— 状态 1（dsh 未运行、按钮写着「启动 DeepSeekHarness」）下
             '  会走到 "打开 DSH 页面" 分支，于是点「启动」变成"用缓存的地址开浏览器"，
             '  dsh 根本没启动（用户实测：浏览器打开 127.0.0.1:3081 无法访问）。
-            '  → 改成按 DshIsRunning / 是否已装版本 判断，文案只用于界面显示。
+            '  → 改成按 DshInstanceIsAlive / 是否已装版本 判断，文案只用于界面显示。
             If DshInstanceSelected Is Nothing Then
                 '还没有整合包：按钮表现为「新建整合包」
                 DshNewInstanceWizard()
@@ -676,8 +676,8 @@ Finish:
                 FrmMain.PageChange(FormMain.PageType.Download, FormMain.PageSubType.DownloadDsh)
                 Return
             End If
-            If DshIsRunning Then
-                '已在运行：只开浏览器（带 token 的地址优先）
+            If DshInstanceIsAlive(DshInstanceSelected) Then
+                '已在运行（**用端口探测判断**，这样外部启动的 dsh 也能识别）：只开浏览器
                 DshOpenBrowser(If(DshWebUrl <> "", DshWebUrl, DshLocalUrl(DshInstanceSelected.Port)))
                 Return
             End If
@@ -726,10 +726,15 @@ Finish:
             CurrentState = 3
         End If
 
-        Dim StateKey As String = CurrentState & "|" & If(Instance Is Nothing, "", Instance.PathInstance) & "|" & DshIsRunning.ToString()
+        '★ 用 DshInstanceIsAlive（内存引用 + **端口探测**）而不是只看 DshIsRunning。
+        '  用户最初就要求"检测该整合包的端口号下是否有 dsh 正在运行" ——
+        '  DshIsRunning 只看启动器内存里的进程引用，对"外部启动的 dsh / 引用已丢失"无效，
+        '  会出现"端口明明有 dsh 在应答，界面却显示未运行"。
+        Dim DshAlive As Boolean = DshInstanceIsAlive(Instance)
+        Dim StateKey As String = CurrentState & "|" & If(Instance Is Nothing, "", Instance.PathInstance) & "|" & DshAlive.ToString()
         If StateKey = DshBtnLastKey Then
             '即使状态没变，运行中的按钮文案仍要刷新
-            If DshIsRunning Then BtnLaunch.Text = "打开 DSH 页面"
+            If DshAlive Then BtnLaunch.Text = "打开 DSH 页面"
             GoTo ExitRefresh
         End If
         DshBtnLastKey = StateKey
@@ -766,11 +771,11 @@ Finish:
                 Logger.Info($"启动按钮：整合包 {Instance.Name}（dsh {Instance.DshVersion}）")
                 BtnLaunch.IsEnabled = True
                 '用户要求：运行中这里就是"打开 dsh 页面"，关闭由旁边那个红色按钮负责
-                BtnLaunch.Text = If(DshIsRunning, "打开 DSH 页面", "启动 DeepSeekHarness")
+                BtnLaunch.Text = If(DshAlive, "打开 DSH 页面", "启动 DeepSeekHarness")
                 LabVersion.Text = $"{Instance.Name}　·　dsh {Instance.DshVersion}　·　端口 {Instance.Port}"
                 BtnMore.Visibility = Visibility.Visible
                 '运行中切到「状态 2」布局（打开 / 关闭 + 整合包管理），否则用「状态 1」整行单按钮
-                DshSetButtonState(DshIsRunning)
+                DshSetButtonState(DshAlive)
                 '状态 2 用的那个「打开 DSH 页面」按钮要确保可点击（它默认是启用的，
                 '但经历过状态 2→1→2 之后要复位，避免上次被禁用后一直点不动）
                 BtnLaunch2.IsEnabled = True

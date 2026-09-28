@@ -4,7 +4,7 @@
 > 记录**目标、约束、已核实的外部事实、避坑清单、进度**。
 > 改动前请先读 §7 的"工作流程"，并遵守 §8 的"注意事项"。
 
-最后更新：2026-09-24 ・ 启动器版本：`v0.8.6`
+最后更新：2026-09-24 ・ 启动器版本：`v0.8.7`
 
 ---
 
@@ -1039,6 +1039,11 @@ A-1. 启动页底部按钮区（**v0.8.6 定稿**：改成"两套布局"，用�
        · **行为分派不要看按钮文案**（#107，我因此把启动功能改坏过）：
          `LaunchButtonClick` 按 `DshInstanceSelected` / `IsVersionInstalled` / `DshIsRunning`
          判断，文案只用于显示。
+       · ★★★ **状态 1 的对齐靠 BtnVersion 的三处属性，删掉任何一处都会破坏**（v0.8.6 我犯过）：
+             Margin="0,10,0,0"                                    右 0（不是 10）
+             HorizontalAlignment="Left"
+             Width="{Binding ActualWidth, ElementName=BtnLaunch}" 绑定方向不能反（#106）
+         实测（状态 1）：BtnLaunch 宽 270 / BtnVersion 宽 270 → 宽差 0。
      稳定性：左栏是固定宽 300（XAML 根元素 `Width="300"`），不随窗口变宽。
 A-2. 设置页左栏（v0.5.1 用户确认）
      只保留： **个性化 / DSH 运行环境 / 整合包管理**
