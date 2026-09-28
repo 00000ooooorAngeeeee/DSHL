@@ -69,19 +69,28 @@
         <!--
             底部按钮区。
             DSH 魔改：dsh 运行中时这里是**两个**按钮（打开页面 / 关闭服务）。
-            占满整行，布局用"星号列 + 固定间距列"，**不做宽度动画**，只动画透明度。
+            布局用"星号列 + 固定间距列"，**不做宽度动画**，只动画透明度。
             为什么不做宽度动画（实机踩坑）：关闭按钮是 HorizontalAlignment=Right，
             即使 Width 从 0 开始动画，它的**布局位置当场就是最终位置**，
             于是动画中途会和"还没缩够"的启动按钮重叠，文字互相压住。
 
-            ★ 必须写 HorizontalAlignment="Stretch"（第二版踩的坑）：
+            ★ Margin 右边必须是 30（用户截图反馈"启动按钮和下面按钮右侧没对齐"）：
+            外层网格的列是 [0:Auto][1:20][2:1*][3:Auto][4:10]，
+            下面那个「整合包管理」(BtnVersion) 在 Column 2，它的右边缘 = 左栏右边界 − 10
+            （因为它自己还带 Margin 右 10）；也就是说**按钮区的右对齐基准是"面板右边 − 10"**。
+            而这里原先写 Margin="20,0"，右边缘 = 面板右边 − 20，比它靠左 10 像素
+            （用户窗口下放大成约 19 像素，肉眼很明显）。
+            → 改成 Margin="20,0,30,0"：右边距 20+10=30，两个区域的右边缘就对齐了。
+              左边仍保持 20，与「整合包管理」的左边缘一致（它在 Column 0/1 之后，
+              内容左边缘也是 20，实测左对齐是好的）。
+
+            ★ 为什么还要 HorizontalAlignment="Stretch"（第二版踩的坑）：
             本 Grid 里还有个 LabVersion（说明文字），它是 HorizontalAlignment=Center 的
             **覆盖层**，不参与父容器的宽度计算。所以这个 Grid 失去了"被 BtnLaunch 撑开"的宽度，
-            退化成按内容宽度排版 → 第一列的星号分不到空间 → 启动按钮被压窄、文字截断成
-            「打开 DSH 页」，右边缘也和下面的「整合包管理」对不齐（用户截图证实）。
-            显式 Stretch 后，星号列就能拿到剩余宽度，两个按钮的右边缘重新与下方对齐。
+            退化成按内容宽度排版 → 第一列的星号分不到空间 → 启动按钮被压窄、文字截断。
+            显式 Stretch 后，星号列就能拿到剩余宽度。
         -->
-        <Grid Grid.ColumnSpan="5" Grid.Row="2" Height="54" Margin="20,0" HorizontalAlignment="Stretch" RenderTransformOrigin="0.5,0.5">
+        <Grid Grid.ColumnSpan="5" Grid.Row="2" Height="54" Margin="20,0,30,0" HorizontalAlignment="Stretch" RenderTransformOrigin="0.5,0.5">
             <Grid.RenderTransform>
                 <TransformGroup>
                     <ScaleTransform x:Name="AprilScaleTrans" />
