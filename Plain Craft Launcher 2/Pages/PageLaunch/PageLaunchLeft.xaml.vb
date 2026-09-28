@@ -20,6 +20,16 @@ Public Class PageLaunchLeft
         AddHandler McFolderListLoader.LoadingStateChanged, AddressOf RefreshButtonsUI
         AddHandler DshInstanceListLoader.LoadingStateChanged, AddressOf RefreshButtonsUI
         AddHandler DshVersionListLoader.LoadingStateChanged, AddressOf RefreshButtonsUI
+        'BtnLaunch 的 Text 是依赖属性（没有 TextChanged 事件），
+        '用 DependencyPropertyDescriptor 监听它，好让底部说明文字在按钮文案变化时重新居中
+        '（文案变了按钮要重新测量，那行说明的可用宽度也跟着变）。
+        Try
+            Dim Dpd As ComponentModel.DependencyPropertyDescriptor =
+                ComponentModel.DependencyPropertyDescriptor.FromProperty(MyButton.TextProperty, GetType(MyButton))
+            If Dpd IsNot Nothing Then Dpd.AddValueChanged(BtnLaunch, Sub() DshRefreshLabVersionMargin())
+        Catch ex As Exception
+            Logger.Warn(ex, "挂接 BtnLaunch 文案变化监听失败")
+        End Try
         RefreshButtonsUI()
 
         'DSH 模式：先扫整合包列表（不联网），并触发首次启动引导
@@ -652,8 +662,9 @@ Finish:
                     DshNewInstanceWizard()
                     RefreshButtonsUI()
                     Return
-                Case "打开 DeepSeekHarness"
+                Case "打开 DSH 页面", "打开 DeepSeekHarness"
                     '服务已在运行，再开一次浏览器即可
+                    '（保留旧文案是为了兼容：万一有别的路径写了老文案也能正常打开）
                     DshOpenBrowser(If(DshWebUrl <> "", DshWebUrl, DshLocalUrl(DshInstanceSelected.Port)))
                     Return
             End Select
@@ -710,7 +721,7 @@ Finish:
         Dim StateKey As String = CurrentState & "|" & If(Instance Is Nothing, "", Instance.PathInstance) & "|" & DshIsRunning.ToString()
         If StateKey = DshBtnLastKey Then
             '即使状态没变，运行中的按钮文案仍要刷新
-            If DshIsRunning Then BtnLaunch.Text = "打开 DeepSeekHarness"
+            If DshIsRunning Then BtnLaunch.Text = "打开 DSH 页面"
             GoTo ExitRefresh
         End If
         DshBtnLastKey = StateKey
@@ -722,12 +733,14 @@ Finish:
                 BtnLaunch.IsEnabled = False
                 LabVersion.Text = "正在加载整合包列表，请稍候"
                 BtnMore.Visibility = Visibility.Collapsed
+                DshSetCloseButtonVisible(False)
             Case 1
                 Logger.Info("启动按钮：还没有任何整合包")
                 BtnLaunch.Text = "新建整合包"
                 BtnLaunch.IsEnabled = True
                 LabVersion.Text = "还没有整合包，点一下新建一个"
                 BtnMore.Visibility = Visibility.Collapsed
+                DshSetCloseButtonVisible(False)
             Case 2
                 Logger.Info($"启动按钮：整合包 {Instance.Name} 尚不可启动（{If(Instance.ErrorMessage, "无错误信息")}）")
                 If Not Instance.IsVersionInstalled Then
@@ -740,12 +753,16 @@ Finish:
                 End If
                 BtnLaunch.IsEnabled = True
                 BtnMore.Visibility = Visibility.Collapsed
+                DshSetCloseButtonVisible(False)
             Case 3
                 Logger.Info($"启动按钮：整合包 {Instance.Name}（dsh {Instance.DshVersion}）")
                 BtnLaunch.IsEnabled = True
-                BtnLaunch.Text = If(DshIsRunning, "打开 DeepSeekHarness", "启动 DeepSeekHarness")
+                '用户要求：运行中这里就是"打开 dsh 页面"，关闭由旁边那个红色按钮负责
+                BtnLaunch.Text = If(DshIsRunning, "打开 DSH 页面", "启动 DeepSeekHarness")
                 LabVersion.Text = $"{Instance.Name}　·　dsh {Instance.DshVersion}　·　端口 {Instance.Port}"
                 BtnMore.Visibility = Visibility.Visible
+                '运行中才显示「关闭 DSH」（红色）
+                DshSetCloseButtonVisible(DshIsRunning)
         End Select
 
         '新建整合包在状态 1 时也允许点击
@@ -775,6 +792,95 @@ ExitRefresh:
         BtnMore.Visibility = Visibility.Collapsed
     End Sub
     Private DshBtnLastKey As String = ""
+
+    ''' <summary>
+    ''' 显示/隐藏「关闭 DSH」按钮。
+    '''
+    ''' 布局说明（为什么只动画透明度、不动宽度）：
+    '''   两个按钮放在同一个 Grid 里，列是「*(启动) / 10(间距) / Auto(关闭)」，
+    '''   关闭按钮 Visible 时自动占住第三列（MinWidth=120），Collapsed 时不占宽度，
+    '''   启动按钮就自动填满剩下的星号列 —— 全程由布局系统算，不需要我们改 Width。
+    '''   **实机踩坑**：第一版用 AaWidth 给两个按钮互相加减宽度，
+    '''   但关闭按钮是 HorizontalAlignment=Right，Width 从 0 动画时它的布局位置
+    '''   当场就是最终位置，于是中途和"还没缩够"的启动按钮重叠、文字互相压住（截图确认过）。
+    '''   现在只动画 Opacity，任何时刻都不会重叠。
+    ''' </summary>
+    Private Sub DshSetCloseButtonVisible(Visible As Boolean)
+        If Visible = (BtnCloseDsh.Visibility = Visibility.Visible) Then Return
+        Try
+            AniStop("FrmLaunchLeft DshCloseBtn")
+            If Visible Then
+                BtnCloseDsh.Visibility = Visibility.Visible
+                AniStart({AaOpacity(BtnCloseDsh, 1 - BtnCloseDsh.Opacity, 120)}, "FrmLaunchLeft DshCloseBtn")
+            Else
+                AniStart({
+                    AaOpacity(BtnCloseDsh, -BtnCloseDsh.Opacity, 120),
+                    AaCode(Sub()
+                               BtnCloseDsh.Visibility = Visibility.Collapsed
+                               BtnCloseDsh.Opacity = 0
+                           End Sub, 130)
+                }, "FrmLaunchLeft DshCloseBtn")
+            End If
+        Catch ex As Exception
+            Logger.Warn(ex, "切换「关闭 DSH」按钮显示失败")
+            '动画失败也要保证状态正确（直接给终态）
+            BtnCloseDsh.Visibility = If(Visible, Visibility.Visible, Visibility.Collapsed)
+            BtnCloseDsh.Opacity = If(Visible, 1, 0)
+        End Try
+    End Sub
+
+    ''' <summary>
+    ''' 关闭 DSH 服务（红色按钮）。
+    ''' 走 DshStop()，它会按"内存引用 → 按整合包目录/DSH_HOME → 只认启动器自己目录的扫描"
+    ''' 三级兜底去找进程（见 ModDshLaunch 的说明），并在结束后复位运行状态。
+    ''' </summary>
+    Private Sub BtnCloseDsh_Click(sender As Object, e As MouseButtonEventArgs) Handles BtnCloseDsh.Click
+        If Not DshModeEnabled() Then Return
+        '已在运行中的 dsh 可能有未保存的会话，先确认一次
+        If MyMsgBox("是否关闭 DeepSeekHarness 服务？" & vbCrLf &
+                    "正在这个 dsh 里进行的对话会被中断。",
+                    "关闭 DSH", "关闭", "取消", IsWarn:=True) <> 1 Then Return
+        RunInThread(
+        Sub()
+            Try
+                DshStop()
+            Catch ex As Exception
+                Logger.Error(ex, "关闭 DSH 失败")
+                RunInUi(Sub() Hint("关闭 DSH 失败：" & ex.Message, HintType.Red))
+            End Try
+            '进程状态变了，强制刷新按钮外观（DshBtnLastKey 里带了 DshIsRunning，会自动重算）
+            RunInUi(
+            Sub()
+                Try
+                    DshBtnLastKey = ""
+                    RefreshButtonsUI()
+                Catch ex As Exception
+                    Logger.Warn(ex, "刷新启动按钮失败")
+                End Try
+            End Sub)
+        End Sub)
+    End Sub
+
+    ''' <summary>按钮文字或宽度变化时，重新计算底部那行说明文字的左右边距，让它始终居中于按钮区域。</summary>
+    Private Sub DshRefreshLabVersionMargin()
+        Try
+            Dim Extra As Double = 0
+            If BtnCloseDsh.Visibility = Visibility.Visible Then Extra = BtnCloseDsh.ActualWidth + 10
+            Dim M As Double = Math.Max(4, Extra / 2)
+            If Math.Abs(LabVersion.Margin.Right - M) > 0.5 Then
+                LabVersion.Margin = New Thickness(LabVersion.Margin.Left, LabVersion.Margin.Top, M, LabVersion.Margin.Bottom)
+            End If
+        Catch
+        End Try
+    End Sub
+
+    Private Sub BtnLaunch_SizeChanged(sender As Object, e As SizeChangedEventArgs) Handles BtnLaunch.SizeChanged
+        DshRefreshLabVersionMargin()
+    End Sub
+
+    Private Sub BtnCloseDsh_SizeChanged(sender As Object, e As SizeChangedEventArgs) Handles BtnCloseDsh.SizeChanged
+        DshRefreshLabVersionMargin()
+    End Sub
 
     Public Sub RefreshButtonsUI() Handles BtnLaunch.Loaded
         If Not BtnLaunch.IsLoaded Then Return
