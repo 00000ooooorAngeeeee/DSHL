@@ -347,4 +347,4 @@ MaskFiles/
 /backups/
 *.bak
 /DSH/
-
+/dist/
