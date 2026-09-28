@@ -6,6 +6,37 @@
              xmlns:local="clr-namespace:PCL"
              mc:Ignorable="d" x:Name="PanBack"
              d:DesignHeight="417.2" Width="300">
+    <!--
+    ================================================================================
+    ★★★ 启动页底部按钮区是**已定稿**的形态（v0.8.4 用户确认："达到了我预期的效果"）★★★
+    ================================================================================
+    修改本文件底部区域前请先读完这段，这组数值是量出来的、不是猜的。
+
+    ● 用户确认的最终效果：
+        未运行 dsh：  [       启动 DeepSeekHarness       ]   ← 与「整合包管理」同宽同位置
+                      [          整合包管理              ]
+        运行中 dsh：  [   打开 DSH 页面   ] [ 关闭 DSH(红) ]
+                      [          整合包管理              ]
+
+    ● 关键约束（改动其中任何一条都会让宽度/位置对不上）：
+        1. 底部按钮区： HorizontalAlignment="Stretch"  Margin="20,0,10,0"
+        2. BtnVersion ： Width 绑定 BtnLaunch.ActualWidth，且 HorizontalAlignment="Left"
+           —— **绑定方向是"BtnVersion 去适配 BtnLaunch"，不能反过来**。
+              反过来会让底部区被 BtnVersion 的宽度钳死，而底部区内部还要留
+              「关闭 DSH」的 Auto 列 + 10 间距，于是 BtnLaunch 永远比 BtnVersion
+              窄 10 像素（宽差恒为 −10，怎么调都对不上）。见 DEVNOTES #106。
+        3. BtnCloseDsh： 不要写 MinWidth（会把主按钮挤窄，文字被截断，见 #101）
+        4. BtnLaunch  ： 不要加 Margin（会改变它的自适应宽度）
+        5. 底部按钮组的列定义必须是 "* / 10 / Auto"，且保持这个顺序
+
+    ● 实测数值（窗口 1128 宽、100% 缩放，用 TransformToAncestor 量得）：
+        BtnLaunch  左=46.1  右=306.0  宽=260
+        BtnVersion 左=47.9  右=307.8  宽=260      → 宽差 0，右边差 1.8
+
+    ● 左栏本身是固定宽 300（见本元素 Width="300"），不随窗口变宽，
+      所以上面这些数值在任意窗口尺寸下都稳定。
+    ================================================================================
+    -->
     <Grid Name="PanInput" RenderTransformOrigin="0.5,0.5">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />

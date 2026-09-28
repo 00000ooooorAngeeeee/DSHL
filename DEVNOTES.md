@@ -4,7 +4,7 @@
 > 记录**目标、约束、已核实的外部事实、避坑清单、进度**。
 > 改动前请先读 §7 的"工作流程"，并遵守 §8 的"注意事项"。
 
-最后更新：2026-09-24 ・ 启动器版本：`v0.8.4`
+最后更新：2026-09-24 ・ 启动器版本：`v0.8.5`
 
 ---
 
@@ -965,3 +965,52 @@ E:\DeepseekHarnessWP\tools\dotnet\dotnet.exe msbuild "Plain Craft Launcher 2\Pla
 5. `ModDshInstall` 的 npm 安装没有接 PCL 的下载任务栏（`LoaderTaskbar`）；v0.3.7 起已改为在下载页显示进度浮层（百分比 ＋ 阶段文案 ＋ 取消），但仍未接入任务栏。**进度观感需实机装一次确认。**
 6. 启动页仍然显示 Minecraft 的账号/皮肤区域（已设为 `IsHitTestVisible = False` 并隐藏部分元素），
    但没有彻底移除，术语清理留待 v0.5.0。
+
+========================================================================
+★ 附录 A：已定稿的 UI 形态（用户确认过，改动前必读）
+========================================================================
+这份清单记录**用户明确确认"达到预期"**的界面形态。改这些地方之前请先读对应条目，
+它们都是反复实测定下来的数值，不是随手写的。
+
+A-1. 启动页底部按钮区（v0.8.4 用户确认："非常好，达到了我预期的效果"）
+     文件：Pages\PageLaunch\PageLaunchLeft.xaml（顶部也有同样的冻结声明）
+     形态：
+        未运行 dsh：  [   启动 DeepSeekHarness   ]      ← 与「整合包管理」同宽同位置
+                      [      整合包管理          ]
+        运行中 dsh：  [ 打开 DSH 页面 ] [ 关闭 DSH(红) ]
+                      [      整合包管理          ]
+     实现要点（改任何一条都会让宽度/位置对不上）：
+       · 底部按钮区： `HorizontalAlignment="Stretch"` + `Margin="20,0,10,0"`
+       · `BtnVersion`： `Width="{Binding ActualWidth, ElementName=BtnLaunch}"`
+                        + `HorizontalAlignment="Left"`
+         ★ **绑定方向必须让 BtnVersion 去适配 BtnLaunch，不能反过来**（DEVNOTES #106）。
+           反过来会让底部区被 BtnVersion 宽度钳死，而底部区内部还要留
+           「关闭 DSH」的 Auto 列 + 10 间距，于是 BtnLaunch 恒比 BtnVersion 窄 10。
+       · `BtnCloseDsh`： 不写 `MinWidth`（DEVNOTES #101，会把主按钮挤窄导致文字截断）
+                          `Padding="15,0,15,15"`、`Visibility=Collapsed`、`Opacity=0`
+       · `BtnLaunch`： 不加 `Margin`；`Padding="30,0,30,15"`
+       · 底部按钮组列定义： `* / 10 / Auto`（顺序不能变）
+       · 「关闭 DSH」的显示/隐藏**只动画透明度**，不动宽度（DEVNOTES #98）
+     实测数值（窗口 1128 宽、100% 缩放，`TransformToAncestor` 量得）：
+        BtnLaunch  左=46.1  右=306.0  宽=260
+        BtnVersion 左=47.9  右=307.8  宽=260      → 宽差 0，右边差 1.8
+     稳定性：左栏是固定宽 300（XAML 根元素 `Width="300"`），不随窗口变宽，
+             所以上述数值在任意窗口尺寸下都成立。
+
+A-2. 设置页左栏（v0.5.1 用户确认）
+     只保留： **个性化 / DSH 运行环境 / 整合包管理**
+     对应固定开关（`ModDshBase.DshApplyModeHideSettings`）：
+        UiHiddenSetupLaunch=True、UiHiddenSetupSystem=True、UiHiddenSetupUi=**False**、
+        UiHiddenSetupLink=False、UiHiddenPageOther=True
+     ★ `UiHiddenSetupUi` 必须是 False：设 True 会让左栏只剩一项，
+       而 PCL 的 `AvaliableCount < 2` 规则会把**整条左栏**收起来（DEVNOTES #67）。
+
+A-3. 顶部导航与「更多」
+     DSH 模式下隐藏「更多」；「下载」页只留「DSH 版本」并默认选中（DEVNOTES #94）。
+
+A-4. 下载页左栏
+     只显示「DSH 版本」，进入即选中（`ItemDsh.Checked = True`）。
+     ★ 隐藏条目时必须检查"默认选中项"有没有落在被隐藏的那个上面（DEVNOTES #94）：
+       原版 XAML 里 `ItemInstall` 带 `Checked="True"`，被隐藏后表现为"什么都没选中"。
+
+========================================================================
