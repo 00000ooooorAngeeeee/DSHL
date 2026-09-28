@@ -730,7 +730,16 @@ Finish:
         '  用户最初就要求"检测该整合包的端口号下是否有 dsh 正在运行" ——
         '  DshIsRunning 只看启动器内存里的进程引用，对"外部启动的 dsh / 引用已丢失"无效，
         '  会出现"端口明明有 dsh 在应答，界面却显示未运行"。
-        Dim DshAlive As Boolean = DshInstanceIsAlive(Instance)
+'★ 必须用**缓存版**（UI 线程零阻塞）。原因（用户反馈"从设置切回启动页卡顿 0.5 秒"）：
+        '  DshInstanceIsAlive 要做 TCP+HTTP 探测，端口空闲时会等满超时，实测阻塞 499/509ms；
+        '  而本方法由 BtnLaunch.Loaded 触发，**每次切回启动页都会跑**。
+        '  缓存版立即返回上次结果，过期了才在后台刷新；结果变化时用回调重刷一次界面。
+        Dim DshAlive As Boolean = DshInstanceIsAliveCached(Instance,
+            Sub(Fresh As Boolean)
+                '后台探测发现状态变了：清掉状态键，让下次刷新真正重算
+                DshBtnLastKey = ""
+                RefreshDshButtonsUI()
+            End Sub)
         Dim StateKey As String = CurrentState & "|" & If(Instance Is Nothing, "", Instance.PathInstance) & "|" & DshAlive.ToString()
         If StateKey = DshBtnLastKey Then
             '即使状态没变，运行中的按钮文案仍要刷新

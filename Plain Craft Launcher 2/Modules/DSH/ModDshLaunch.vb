@@ -230,6 +230,7 @@ Public Module ModDshLaunch
 
         '7. 打开浏览器（需求 1 的核心）
         Loader.Progress = 0.95
+        DshInvalidateAliveCache()   '启动成功，让存活缓存立即反映"已运行"（见 DshInstanceIsAliveCached）
         DshLog($"DeepSeekHarness 已就绪：{DshWebUrl}", Loader)
         If Not GotTokenUrl Then
             DshLog("⚠ 没能从 dsh 输出里解析出带 ?token= 的地址。dsh 的访问 token 是进程独有的，" &
@@ -469,6 +470,83 @@ Public Module ModDshLaunch
         Return False
     End Function
 
+    '────────────────────────────────────────────────────────────────────────────
+    ' 存活判定缓存
+    '
+    ' 为什么需要（用户反馈"从设置切回启动页卡顿约 0.5 秒"）：
+    '   `DshInstanceIsAlive` 要做 TCP 连接 + HTTP 探测，而 **端口空闲时要等满超时**才返回，
+    '   实测阻塞 UI 线程 499/509ms。而它在 `RefreshDshButtonsUI` 里被同步调用，
+    '   那个方法由 `BtnLaunch.Loaded` 触发 —— 每次切回启动页都会跑一次。
+    ' 做法：UI 线程只读**缓存**（零阻塞）；缓存过期时丢到后台线程刷新并回调。
+    '   缓存有效期很短（1.5 秒），保证"刚启动/刚关闭"能很快反映；
+    '   启动与关闭动作还会**主动作废缓存**（见 DshInvalidateAliveCache）。
+    '────────────────────────────────────────────────────────────────────────────
+    Private _DshAliveCache As New Dictionary(Of String, Boolean)(StringComparer.OrdinalIgnoreCase)
+    Private _DshAliveStamp As New Dictionary(Of String, Long)(StringComparer.OrdinalIgnoreCase)
+    Private ReadOnly _DshAliveLock As New Object()
+    Private Const DshAliveCacheMs As Long = 1500
+
+    ''' <summary>作废存活缓存（启动/关闭 dsh 之后必须调用，否则界面会短暂显示旧状态）。</summary>
+    Public Sub DshInvalidateAliveCache()
+        SyncLock _DshAliveLock
+            _DshAliveCache.Clear()
+            _DshAliveStamp.Clear()
+        End SyncLock
+    End Sub
+
+    ''' <summary>
+    ''' 缓存版的存活判定：**UI 线程调用安全（不阻塞）**。
+    ''' 有缓存就立即返回它；若已过期则同时丢到后台刷新，值变化时回调 OnRefreshed。
+    ''' 完全没有缓存时才做一次真实探测（首次进启动页，已把超时压到 150ms 以内）。
+    ''' </summary>
+    Public Function DshInstanceIsAliveCached(Instance As DshInstance, Optional OnRefreshed As Action(Of Boolean) = Nothing) As Boolean
+        If Instance Is Nothing Then Return False
+        Dim Key As String = Instance.PathInstance
+        Dim HasCache As Boolean = False
+        Dim Cached As Boolean = False
+        Dim Stale As Boolean = True
+        SyncLock _DshAliveLock
+            If _DshAliveCache.ContainsKey(Key) Then
+                HasCache = True
+                Cached = _DshAliveCache(Key)
+                Stale = (GetTimeMs() - _DshAliveStamp(Key)) > DshAliveCacheMs
+            End If
+        End SyncLock
+
+        If Not HasCache Then
+            '首次：只能真实探测一次（超时已压到 150ms，可接受）
+            Cached = DshInstanceIsAlive(Instance)
+            SyncLock _DshAliveLock
+                _DshAliveCache(Key) = Cached
+                _DshAliveStamp(Key) = GetTimeMs()
+            End SyncLock
+            Return Cached
+        End If
+
+        If Stale Then
+            Dim Prev As Boolean = Cached
+            Task.Run(
+            Sub()
+                Dim Fresh As Boolean = False
+                Try
+                    Fresh = DshInstanceIsAlive(Instance)
+                Catch
+                End Try
+                SyncLock _DshAliveLock
+                    _DshAliveCache(Key) = Fresh
+                    _DshAliveStamp(Key) = GetTimeMs()
+                End SyncLock
+                If OnRefreshed IsNot Nothing AndAlso Fresh <> Prev Then
+                    Try
+                        RunInUi(Sub() OnRefreshed(Fresh))
+                    Catch
+                    End Try
+                End If
+            End Sub)
+        End If
+        Return Cached
+    End Function
+
     ''' <summary>
     ''' 尝试把"丢失的进程引用"找回来：按整合包目录 / DSH_HOME 在命令行里匹配 node 进程，
     ''' 命中就把它记成启动器当前管理的进程。
@@ -495,6 +573,7 @@ Public Module ModDshLaunch
                     If Keys.Any(Function(K) K <> "" AndAlso Lower.Contains(K)) Then
                         DshCurrentProcess = P
                         DshProcessInstance = Instance
+                        DshInvalidateAliveCache()   '重新接管进程后，存活缓存必须作废
                         Logger.Info($"已重新接管整合包 {Instance.Name} 的 dsh 进程（PID {P.Id}）")
                         Return
                     End If
@@ -560,6 +639,7 @@ Public Module ModDshLaunch
         DshCurrentProcess = Nothing
         DshProcessInstance = Nothing
         DshWebUrl = ""
+        DshInvalidateAliveCache()   '进程引用已清，存活缓存也要作废（否则界面会短暂停在'运行中'）
         If Inst IsNot Nothing Then
             Try
                 Dim P As String = Inst.PathInstance & ".pcl-web-url"

@@ -423,13 +423,21 @@ Public Module ModDshBase
         Return Out
     End Function
 
-    ''' <summary>探测 TCP 端口是否已被占用。</summary>
+    ''' <summary>
+    ''' 探测 TCP 端口是否已被占用。
+    ''' ★ 超时值很关键（用户反馈"从设置切回启动页卡顿约 0.5 秒"）：
+    '''   **端口空闲时不会立即失败，而是要等满整个超时才返回**（本地回环也是如此），
+    '''   所以原来写 500ms 就等于"每次探测空闲端口都固定阻塞 500ms"。
+    '''   实测日志：`[性能] DshInstanceIsAlive 499 ms` / `509 ms`。
+    '''   连本机回环端口不需要 500ms —— 150ms 足够（监听中的端口通常几毫秒内就完成握手），
+    '''   而且真连不上时也把固定开销压到 150ms。
+    ''' </summary>
     Public Function DshPortInUse(Port As Integer) As Boolean
         Dim Client As Net.Sockets.TcpClient = Nothing
         Try
             Client = New Net.Sockets.TcpClient()
             Dim Task = Client.ConnectAsync("127.0.0.1", Port)
-            Return Task.Wait(500) AndAlso Client.Connected
+            Return Task.Wait(150) AndAlso Client.Connected
         Catch
             Return False
         Finally
