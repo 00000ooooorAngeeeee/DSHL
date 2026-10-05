@@ -4,7 +4,7 @@
 > 记录**目标、约束、已核实的外部事实、避坑清单、进度**。
 > 改动前请先读 §7 的"工作流程"，并遵守 §8 的"注意事项"。
 
-最后更新：2026-09-24 ・ 启动器版本：`v0.8.15`
+最后更新：2026-09-24 ・ 启动器版本：`v0.8.16`
 
 ---
 
@@ -1042,6 +1042,49 @@ E:\DeepseekHarnessWP\
 116. **公开仓库前必须做"许可 + 隐私 + 体积"三项体检 —— 我漏检了一项，被迫改写 git 历史。**
     用户要求把项目传到 Gitee/GitHub。上传前我做了检查，但**漏掉了一个 2.4 MB 的二进制**，
     推上去之后才发现，只能用 git filter-branch 从全部历史里剔除再强推。教训分几条：
+
+117. **hosts 屏蔽了某个站点时，不一定要改 hosts —— 可以只给 git 加一个"本地 DNS 映射代理"。**
+    背景：本机 hosts 有 22 条 github 相关条目指向 127.0.0.1（Steam++/Watt Toolkit 写的），
+    GitHub 完全不可达。但改 hosts 需要管理员权限（当前不是），而且那个工具会覆盖回去。
+
+    **关键判断：先分清是"仅 DNS 层屏蔽"还是"IP 层也被封"。**
+    做法是用公共 DoH 绕过本地 hosts 查真实 IP，再直接验证：
+        # 查真实 IP（阿里 DoH）
+        curl "https://dns.alidns.com/resolve?name=github.com&type=A"
+        # 直连 IP 的 443
+        Test-NetConnection -ComputerName 20.205.243.166 -Port 443
+        # 用 --resolve 绕过 hosts 发真实 HTTPS 请求
+        curl --resolve github.com:443:20.205.243.166 https://github.com
+    实测结果：github.com -> 20.205.243.166，TCP443=True，**HTTP 200**
+    => **只是 DNS 被屏蔽，IP 层完全通**，所以有救。
+
+    **解决：写一个本地 HTTP CONNECT 代理，把域名映射到真实 IP，只让 git 走它。**
+    脚本在 tools/github-proxy.js（Node.js，不依赖任何包）：
+        node tools/github-proxy.js 17890      # 监听 127.0.0.1:17890
+    代理里维护一张"域名 -> 真实 IP"表（IP 是实测出来的，见脚本注释）：
+        github.com                    20.205.243.166
+        api.github.com                20.205.243.168
+        codeload.github.com           20.205.243.165
+        raw.githubusercontent.com     185.199.109.133
+        objects.githubusercontent.com 185.199.108.133
+    然后给这一个 remote 单独配代理（**不要写全局 http.proxy**，免得影响 Gitee）：
+        git remote add github https://github.com/<用户>/<仓库>.git
+        git config --local remote.github.proxy http://127.0.0.1:17890
+        git push github master:main
+
+    **优点：不动系统 hosts、不需要管理员、退出即恢复、只影响指定 remote。**
+    **注意：代理进程要一直开着才有效；端口固定 17890。**
+    缺点：IP 是硬编码的，GitHub 换 IP 后要重新探测（方法见上）。
+
+    **通用教训：遇到"域名被屏蔽"，先测"IP 层通不通"。**
+    如果只是 DNS 被劫持/屏蔽（国内很常见），那么绕过 DNS 就够了，
+    完全不需要动 hosts、不需要装代理软件、不需要管理员权限。
+
+    **另：GitHub 从 2021 年起不接受账号密码，推送必须用 PAT 或 OAuth。**
+    本次用 Git Credential Manager 2.7.3 的 `github login` 完成浏览器 OAuth 授权：
+        "C:\Program Files\Git\mingw64\bin\git-credential-manager.exe" github login
+    凭据存进 Windows 凭据管理器（Target: LegacyGeneric:target=git:https://github.com），
+    之后 git push 不再需要输入。
 
     (1) 先搞清许可类型，别默认是 GPL。
     PCL 用的**不是** GPL，而是自定义的《PCL 分发有限许可》+《存储库合理使用指南》
